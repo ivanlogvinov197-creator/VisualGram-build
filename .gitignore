@@ -1,0 +1,8 @@
+*.ipa
+*.enc
+*.p12
+*.mobileprovision
+*.pem
+.env*
+__pycache__/
+telegram-native/
