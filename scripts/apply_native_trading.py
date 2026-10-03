@@ -82,7 +82,36 @@ def apply_trading(root):
                                 return
                             }
 ''')
-    replace(screen, '        func requestUpgradePreview() {\n', '        func requestUpgradePreview() {\n            if self.isVisualGramGift && !self.visualGramCanManage { return }\n')
+    replace(screen, '        func requestUpgradePreview() {\n', '''        func requestUpgradePreview() {
+            if self.isVisualGramGift {
+                guard self.visualGramCanManage else { return }
+                if self.upgradePreview == nil, case let .generic(gift) = self.subject.arguments?.gift {
+                    guard !self.inProgress else { return }
+                    self.inProgress = true
+                    self.updated()
+                    self.upgradePreviewDisposable.add((self.context.engine.payments.starGiftUpgradePreview(giftId: gift.id) |> deliverOnMainQueue).start(next: { [weak self] preview in
+                        guard let self else { return }
+                        self.inProgress = false
+                        self.scheduledUpgradePreview = false
+                        guard let preview else {
+                            self.updated()
+                            self.showAttributeInfo(tag: self.statusTag, text: "Улучшение пока недоступно. Попробуй ещё раз.")
+                            return
+                        }
+                        self.upgradePreview = preview
+                        for attribute in preview.attributes {
+                            switch attribute {
+                            case let .model(_, file, _, _), let .pattern(_, file, _):
+                                self.upgradePreviewDisposable.add(freeMediaFileResourceInteractiveFetched(account: self.context.account, userLocation: .other, fileReference: .standalone(media: file), resource: file.resource).start())
+                            default: break
+                            }
+                        }
+                        self.requestUpgradePreview()
+                    }))
+                    return
+                }
+            }
+''')
     replace(screen, '                guard !self.inProgress, let reference = arguments.reference,\n', '                guard !self.inProgress, self.visualGramCanManage, let reference = self.visualGramReference,\n')
     replace(screen, '''            if VisualGramLocalAppearance.isLocalReference(subject.arguments?.reference) {
                 incoming = true
