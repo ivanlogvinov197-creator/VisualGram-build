@@ -56,7 +56,7 @@ public extension VisualGramLocalAppearance {
     func listLocalGift(accountId: EnginePeer.Id, reference: StarGiftReference?, price: Int64?) -> Bool {
         guard price == nil || (price! > 0 && price! <= Int64(Int32.max)),
               self.canManageLocalGift(accountId: accountId, reference: reference),
-              case let .unique(_) = self.localGift(accountId: accountId, reference: reference)?.gift else { return false }
+              case .unique = self.localGift(accountId: accountId, reference: reference)?.gift else { return false }
         var changed = false
         self.updateValues { values in
             let key = String(accountId.toInt64())

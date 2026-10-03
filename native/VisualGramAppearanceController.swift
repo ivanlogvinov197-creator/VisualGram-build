@@ -475,7 +475,7 @@ func visualGramAppearanceController(context: AccountContext) -> ViewController {
             }
             add(2000 + Int32(index), 2, local.direction == .sent ? "Отправлено: \(title)" : title, .button(""))
         }
-        let queue = (VisualGramLocalAppearance.shared.appearance(accountId: context.account.peerId).scheduledGifts ?? []).filter { $0.targetPeerId == actions.targetPeerId.toInt64() }.sorted { $0.deliveryDate < $1.deliveryDate }
+        let queue = VisualGramLocalAppearance.shared.pendingScheduledGifts.filter { $0.targetPeerId == actions.targetPeerId.toInt64() }.sorted { $0.deliveryDate < $1.deliveryDate }
         let formatter = DateFormatter()
         formatter.dateStyle = .short
         formatter.timeStyle = .short
