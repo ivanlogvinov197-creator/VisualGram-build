@@ -26,7 +26,7 @@ func visualGramChatGiftEntries(context: AccountContext, peerId: PeerId, peer: Pe
         case .generic:
             action = .starGift(gift: gift, convertStars: nil, text: local.text.isEmpty ? nil : local.text, entities: nil, nameHidden: false, savedToProfile: incoming, converted: false, upgraded: false, canUpgrade: false, upgradeStars: nil, isRefunded: false, isPrepaidUpgrade: false, upgradeMessageId: nil, peerId: nil, senderId: senderId, savedId: nil, prepaidUpgradeHash: nil, giftMessageId: nil, upgradeSeparate: false, isAuctionAcquired: false, toPeerId: recipientId, number: nil)
         case .unique:
-            action = .starGiftUnique(gift: gift, isUpgrade: false, isTransferred: false, savedToProfile: incoming, canExportDate: nil, transferStars: nil, isRefunded: false, isPrepaidUpgrade: false, peerId: nil, senderId: senderId, savedId: nil, resaleAmount: nil, canTransferDate: nil, canResaleDate: nil, dropOriginalDetailsStars: nil, assigned: false, fromOffer: false, canCraftAt: nil, isCrafted: false)
+            action = .starGiftUnique(gift: gift, isUpgrade: false, isTransferred: local.isTransferred ?? false, savedToProfile: incoming, canExportDate: nil, transferStars: nil, isRefunded: false, isPrepaidUpgrade: false, peerId: nil, senderId: senderId, savedId: nil, resaleAmount: nil, canTransferDate: nil, canResaleDate: nil, dropOriginalDetailsStars: nil, assigned: false, fromOffer: false, canCraftAt: nil, isCrafted: false)
         }
         var peers = SimpleDictionary<PeerId, Peer>()
         peers[peerId] = peer

@@ -35,6 +35,9 @@ public struct VisualGramGift: Codable, Equatable {
     public var collectionIds: [Int32]?
     public var localIdentifier: String?
     public var hidesOriginalInfo: Bool?
+    public var isHistoryOnly: Bool?
+    public var isTransferred: Bool?
+    public var resaleStars: Int64?
 
     public init(gift: StarGift, counterpartyId: Int64?, direction: Direction = .received, date: Int32, text: String) {
         self.gift = gift
@@ -68,13 +71,16 @@ public struct VisualGramGift: Codable, Equatable {
         let senderId = self.direction == .sent ? accountId : self.counterpartyId.map { EnginePeer.Id($0) }
         var attributes = gift.attributes.filter { $0.attributeType != .originalInfo }
         if self.hidesOriginalInfo != true { attributes.append(.originalInfo(senderPeerId: senderId, recipientPeerId: recipientId, date: self.date, text: self.text.isEmpty ? nil : self.text, entities: nil)) }
-        return .unique(StarGift.UniqueGift(id: gift.id, giftId: gift.giftId, title: gift.title, number: gift.number, slug: gift.slug, owner: .peerId(recipientId), attributes: attributes, availability: gift.availability, giftAddress: nil, resellAmounts: nil, resellForTonOnly: false, releasedBy: gift.releasedBy, valueAmount: gift.valueAmount, valueCurrency: gift.valueCurrency, valueUsdAmount: gift.valueUsdAmount, flags: gift.flags, themePeerId: gift.themePeerId, peerColor: gift.peerColor, hostPeerId: nil, minOfferStars: nil, craftChancePermille: nil))
+        let prices = self.resaleStars.map { [CurrencyAmount(currency: .stars, amount: StarsAmount(value: $0, nanos: 0))] }
+        return .unique(StarGift.UniqueGift(id: gift.id, giftId: gift.giftId, title: gift.title, number: gift.number, slug: gift.slug, owner: .peerId(recipientId), attributes: attributes, availability: gift.availability, giftAddress: nil, resellAmounts: prices, resellForTonOnly: false, releasedBy: gift.releasedBy, valueAmount: gift.valueAmount, valueCurrency: gift.valueCurrency, valueUsdAmount: gift.valueUsdAmount, flags: gift.flags, themePeerId: gift.themePeerId, peerColor: gift.peerColor, hostPeerId: nil, minOfferStars: nil, craftChancePermille: nil))
     }
 
     public func profileGift(accountId: EnginePeer.Id, sender: EnginePeer?) -> ProfileGiftsContext.State.StarGift {
         let canUpgrade: Bool
-        if case let .generic(gift) = self.gift { canUpgrade = gift.upgradeStars != nil && self.direction == .received } else { canUpgrade = false }
-        return ProfileGiftsContext.State.StarGift(gift: self.displayGift(accountId: accountId), reference: self.reference(accountId: accountId), fromPeer: sender, date: self.date, text: self.text.isEmpty ? nil : self.text, entities: nil, nameHidden: false, savedToProfile: self.savedToProfile ?? true, pinnedToTop: self.pinnedToTop ?? false, convertStars: nil, canUpgrade: canUpgrade, canExportDate: nil, upgradeStars: nil, transferStars: nil, canTransferDate: nil, canResaleDate: nil, collectionIds: self.collectionIds, prepaidUpgradeHash: nil, upgradeSeparate: false, dropOriginalDetailsStars: nil, number: nil, isRefunded: false, canCraftAt: nil)
+        if case let .generic(gift) = self.gift { canUpgrade = gift.upgradeStars != nil && self.direction == .received && self.isHistoryOnly != true } else { canUpgrade = false }
+        let transferStars: Int64?
+        if case .unique = self.gift, self.direction == .received, self.isHistoryOnly != true { transferStars = 0 } else { transferStars = nil }
+        return ProfileGiftsContext.State.StarGift(gift: self.displayGift(accountId: accountId), reference: self.reference(accountId: accountId), fromPeer: sender, date: self.date, text: self.text.isEmpty ? nil : self.text, entities: nil, nameHidden: false, savedToProfile: self.savedToProfile ?? true, pinnedToTop: self.pinnedToTop ?? false, convertStars: nil, canUpgrade: canUpgrade, canExportDate: nil, upgradeStars: nil, transferStars: transferStars, canTransferDate: nil, canResaleDate: nil, collectionIds: self.collectionIds, prepaidUpgradeHash: nil, upgradeSeparate: false, dropOriginalDetailsStars: nil, number: nil, isRefunded: false, canCraftAt: nil)
     }
 }
 
@@ -107,6 +113,12 @@ public final class VisualGramLocalAppearance {
     private let revision = ValuePromise<Int32>(0, ignoreRepeated: false)
     private var revisionValue: Int32 = 0
     private var values: [String: VisualGramAppearance]
+
+    func snapshotValues() -> [String: VisualGramAppearance] {
+        self.lock.lock()
+        defer { self.lock.unlock() }
+        return self.values
+    }
 
     private init() {
         self.defaults = UserDefaults.standard

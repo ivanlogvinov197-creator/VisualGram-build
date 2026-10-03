@@ -325,8 +325,7 @@ private final class VisualGramAppearanceActions {
             // The native preview dismisses itself after the custom action.
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
                 guard let self else { return }
-                if local.direction == .sent { self.chooseGiftDelivery(local, targetPeerId: targetPeerId) }
-                else { self.deliverGift(local, targetPeerId: targetPeerId) }
+                self.chooseGiftDelivery(local, targetPeerId: targetPeerId)
             }
         }))
         controller.push(preview)
@@ -339,9 +338,10 @@ private final class VisualGramAppearanceActions {
     }
 
     private func chooseGiftDelivery(_ gift: VisualGramGift, targetPeerId: EnginePeer.Id) {
-        let alert = UIAlertController(title: "Отправить подарок", message: "Подарок будет виден только тебе в этом клиенте.", preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: "Отправить сейчас", style: .default, handler: { [weak self] _ in self?.deliverGift(gift, targetPeerId: targetPeerId) }))
-        alert.addAction(UIAlertAction(title: "Отложить отправку", style: .default, handler: { [weak self] _ in
+        let receiving = gift.direction == .received
+        let alert = UIAlertController(title: receiving ? "Получить подарок" : "Отправить подарок", message: "Подарок будет виден только тебе в этом клиенте.", preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: receiving ? "Получить сейчас" : "Отправить сейчас", style: .default, handler: { [weak self] _ in self?.deliverGift(gift, targetPeerId: targetPeerId) }))
+        alert.addAction(UIAlertAction(title: receiving ? "Отложить получение" : "Отложить отправку", style: .default, handler: { [weak self] _ in
             DispatchQueue.main.async { self?.pickDeliveryDate(currentTime: nil) { [weak self] time in
                 guard let self else { return }
                 VisualGramLocalAppearance.shared.scheduleGift(accountId: self.context.account.peerId, targetPeerId: targetPeerId, gift: gift, deliveryDate: time)
@@ -384,7 +384,7 @@ private final class VisualGramAppearanceActions {
         guard self.appearance.gifts.indices.contains(index), self.controller != nil else { return }
         let local = self.appearance.gifts[index]
         let alert = UIAlertController(title: "Локальный подарок", message: nil, preferredStyle: .alert)
-        if local.direction == .received {
+        if local.direction == .received && local.isHistoryOnly != true && self.targetPeerId == self.context.account.peerId {
             alert.addAction(UIAlertAction(title: (local.pinnedToTop ?? false) ? "Открепить" : "Закрепить", style: .default, handler: { [weak self] _ in
                 guard let self else { return }
                 if !(local.pinnedToTop ?? false), self.appearance.gifts.filter({ $0.pinnedToTop ?? false }).count >= 6 { self.message("Можно закрепить до 6 локальных подарков."); return }

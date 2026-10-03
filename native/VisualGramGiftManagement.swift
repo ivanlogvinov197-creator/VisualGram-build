@@ -113,7 +113,8 @@ public extension VisualGramLocalAppearance {
     // Read-only preview samples provide the original media and valid attribute combinations.
     // This creates a private visual collectible, without calling an upgrade/payment RPC.
     func upgradeLocalGift(accountId: EnginePeer.Id, reference: StarGiftReference?, preview: StarGiftUpgradePreview, keepOriginalInfo: Bool) -> ProfileGiftsContext.State.StarGift? {
-        guard let local = self.localGift(accountId: accountId, reference: reference), local.direction == .received,
+        guard self.canManageLocalGift(accountId: accountId, reference: reference),
+              let local = self.localGift(accountId: accountId, reference: reference), local.direction == .received,
               case let .generic(generic) = local.gift, case let .message(messageId) = reference else { return nil }
         guard let model = preview.attributes.filter({ $0.attributeType == .model }).randomElement(),
               let pattern = preview.attributes.filter({ $0.attributeType == .pattern }).randomElement(),
@@ -140,7 +141,7 @@ public extension VisualGramLocalAppearance {
 
     @discardableResult
     func updateGift(accountId: EnginePeer.Id, reference: StarGiftReference?, change: (inout VisualGramGift) -> Void) -> Bool {
-        guard let gift = self.localGift(accountId: accountId, reference: reference), case let .message(id) = reference else { return false }
+        guard self.canManageLocalGift(accountId: accountId, reference: reference), let gift = self.localGift(accountId: accountId, reference: reference), case let .message(id) = reference else { return false }
         self.update(accountId: accountId, targetPeerId: id.peerId) { value in
             if let index = value.gifts.firstIndex(where: { $0.identifier == gift.identifier }) { change(&value.gifts[index]) }
         }
@@ -163,7 +164,7 @@ public extension VisualGramLocalAppearance {
     func profileState(_ server: ProfileGiftsContext.State, accountId: EnginePeer.Id, peerId: EnginePeer.Id, collectionId: Int32?, senders: [Int64: EnginePeer] = [:]) -> ProfileGiftsContext.State {
         let value = self.appearance(accountId: accountId, targetPeerId: peerId)
         guard value.enabled else { return server }
-        let local = value.gifts.filter { $0.direction == .received && (collectionId == nil || ($0.collectionIds ?? []).contains(collectionId!)) }
+        let local = value.gifts.filter { $0.direction == .received && $0.isHistoryOnly != true && (collectionId == nil || ($0.collectionIds ?? []).contains(collectionId!)) }
         var result = server
         let localSlugs = Set(local.compactMap { item -> String? in
             if case let .unique(gift) = item.gift { return gift.slug }; return nil
@@ -200,7 +201,7 @@ public extension VisualGramLocalAppearance {
     func collection(accountId: EnginePeer.Id, targetPeerId: EnginePeer.Id? = nil, id: Int32) -> StarGiftCollection? {
         let value = self.appearance(accountId: accountId, targetPeerId: targetPeerId)
         guard let collection = value.collections?.first(where: { $0.id == id }) else { return nil }
-        let gifts = value.gifts.filter { $0.direction == .received && ($0.collectionIds ?? []).contains(id) }
+        let gifts = value.gifts.filter { $0.direction == .received && $0.isHistoryOnly != true && ($0.collectionIds ?? []).contains(id) }
         var icon: TelegramMediaFile?
         if let first = gifts.first {
             switch first.gift {
@@ -251,7 +252,7 @@ public extension VisualGramLocalAppearance {
         guard value.enabled else { return server }
         var result = server
         result.collections = (value.collections ?? []).compactMap { self.collection(accountId: accountId, targetPeerId: peerId, id: $0.id) } + server.collections.map { collection in
-            let added = value.gifts.filter { $0.direction == .received && ($0.collectionIds ?? []).contains(collection.id) }.count
+            let added = value.gifts.filter { $0.direction == .received && $0.isHistoryOnly != true && ($0.collectionIds ?? []).contains(collection.id) }.count
             return StarGiftCollection(id: collection.id, title: collection.title, icon: collection.icon, count: collection.count + Int32(added), hash: collection.hash)
         }
         return result
