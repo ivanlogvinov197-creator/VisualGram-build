@@ -1,0 +1,111 @@
+name: Build native Telegram client
+
+on:
+  workflow_dispatch:
+    inputs:
+      validation_only:
+        description: Validate source patches and Swift syntax without compiling IPA
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    runs-on: macos-26
+    timeout-minutes: 180
+    steps:
+      - name: Checkout VisualGram patches
+        uses: actions/checkout@v4
+
+      - name: Checkout pinned official Telegram
+        uses: actions/checkout@v4
+        with:
+          repository: TelegramMessenger/Telegram-iOS
+          ref: 6ad963e5b62d354da79040f388ae2b9132fb17b8
+          path: telegram-native
+          submodules: recursive
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Select upstream Xcode
+        run: |
+          sudo xcode-select -s /Applications/Xcode_26.2.app/Contents/Developer
+          xcodebuild -version
+          df -h .
+
+      - name: Install signing dependency
+        run: brew install openssl@3
+
+      - name: Install signing assets
+        id: signing
+        env:
+          BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
+          BUILD_PROVISION_PROFILE_BASE64: ${{ secrets.BUILD_PROVISION_PROFILE_BASE64 }}
+          P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
+        run: bash scripts/install-signing.sh
+
+      - name: Prepare official source and private configuration
+        env:
+          TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+          TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+          SIGNING_TEAM: ${{ steps.signing.outputs.team }}
+          APP_BUNDLE_ID: ${{ steps.signing.outputs.bundle }}
+        run: |
+          python3 scripts/prepare_native.py telegram-native --configuration "$RUNNER_TEMP/native-configuration.json"
+          python3 scripts/apply_native_features.py telegram-native
+          xcrun swiftc -frontend -parse native/*.swift
+          python3 scripts/test_native_delivery.py
+          python3 scripts/test_native_upgrade.py
+          mkdir -p "$RUNNER_TEMP/native-signing/profiles" "$RUNNER_TEMP/native-signing/certs"
+          cp "$RUNNER_TEMP/profile.mobileprovision" "$RUNNER_TEMP/native-signing/profiles/Telegram.mobileprovision"
+
+      - name: Compile native Telegram arm64
+        if: inputs.validation_only != true
+        working-directory: telegram-native
+        run: |
+          python3 build-system/Make/Make.py \
+            --cacheDir "$RUNNER_TEMP/telegram-bazel-cache" \
+            build --configurationPath "$RUNNER_TEMP/native-configuration.json" \
+            --codesigningInformationPath "$RUNNER_TEMP/native-signing" \
+            --buildNumber "$((1000 + GITHUB_RUN_NUMBER))" --configuration release_arm64 \
+            --outputBuildArtifactsPath "$RUNNER_TEMP/native-artifacts"
+
+      - name: Validate IPA signature
+        if: inputs.validation_only != true
+        run: |
+          mkdir -p "$RUNNER_TEMP/verify-ipa"
+          unzip -q "$RUNNER_TEMP/native-artifacts/Telegram.ipa" -d "$RUNNER_TEMP/verify-ipa"
+          codesign --verify --deep --strict "$RUNNER_TEMP/verify-ipa/Payload/Telegram.app"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleDisplayName' "$RUNNER_TEMP/verify-ipa/Payload/Telegram.app/Info.plist")" = "Telegram"
+
+      - name: Encrypt signed IPA for private download
+        if: inputs.validation_only != true
+        env:
+          IPA_EXPORT_PASSWORD: ${{ secrets.IPA_EXPORT_PASSWORD }}
+        run: |
+          test "${#IPA_EXPORT_PASSWORD}" -ge 32
+          "$(brew --prefix openssl@3)/bin/openssl" enc -aes-256-cbc -salt -saltlen 8 -md sha256 -pbkdf2 -iter 200000 \
+            -pass env:IPA_EXPORT_PASSWORD \
+            -in "$RUNNER_TEMP/native-artifacts/Telegram.ipa" \
+            -out "$RUNNER_TEMP/native-artifacts/Telegram.ipa.enc"
+          rm -f "$RUNNER_TEMP/native-artifacts/Telegram.ipa"
+
+      - name: Upload encrypted signed IPA
+        if: inputs.validation_only != true
+        uses: actions/upload-artifact@v4
+        with:
+          name: Telegram-encrypted
+          path: ${{ runner.temp }}/native-artifacts/Telegram.ipa.enc
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Remove temporary credentials
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/visualgram-signing.keychain-db" 2>/dev/null || true
+          rm -f "$RUNNER_TEMP/signing.p12" "$RUNNER_TEMP/profile.mobileprovision" "$RUNNER_TEMP/profile.plist"
+          rm -f "$RUNNER_TEMP/signing-key.pem" "$RUNNER_TEMP/signing-compatible.p12" "$RUNNER_TEMP/native-configuration.json"
+          rm -f "$RUNNER_TEMP/native-signing/profiles/Telegram.mobileprovision"
+          rm -f "$HOME/Library/MobileDevice/Provisioning Profiles/visualgram-ci.mobileprovision"
