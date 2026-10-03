@@ -151,6 +151,15 @@ public extension VisualGramLocalAppearance {
         values[targetKey] = target
     }
 
+    func hasLocalGiftListings(giftId: Int64) -> Bool {
+        return self.snapshotValues().values.contains { value in
+            value.enabled && value.gifts.contains { local in
+                guard local.direction == .received, local.isHistoryOnly != true, (local.resaleStars ?? 0) > 0, case let .unique(gift) = local.gift else { return false }
+                return gift.giftId == giftId
+            }
+        }
+    }
+
     func localMarketState(_ server: ResaleGiftsContext.State, giftId: Int64, accountId: EnginePeer.Id) -> ResaleGiftsContext.State {
         var result = server
         var local: [StarGift] = []
@@ -171,6 +180,14 @@ public extension VisualGramLocalAppearance {
         }
         let localSlugs = Set(local.compactMap { if case let .unique(gift) = $0 { return gift.slug }; return nil as String? })
         result.gifts = local + server.gifts.filter { if case let .unique(gift) = $0 { return !localSlugs.contains(gift.slug) }; return true }
+        if server.sorting == .value {
+            result.gifts.sort {
+                guard case let .unique(a) = $0, case let .unique(b) = $1 else { return false }
+                return (a.resellAmounts?.first(where: { $0.currency == .stars })?.amount.value ?? Int64.max) < (b.resellAmounts?.first(where: { $0.currency == .stars })?.amount.value ?? Int64.max)
+            }
+        } else if server.sorting == .number {
+            result.gifts.sort { guard case let .unique(a) = $0, case let .unique(b) = $1 else { return false }; return a.number < b.number }
+        }
         result.count = max(Int32(result.gifts.count), (server.count ?? 0) + Int32(local.count))
         return result
     }

@@ -365,7 +365,7 @@ private final class VisualGramAppearanceActions {
         guard queue.indices.contains(index) else { return }
         let pending = queue[index]
         let alert = UIAlertController(title: "Отложенный подарок", message: self.dateFormatter.string(from: Date(timeIntervalSince1970: TimeInterval(pending.deliveryDate))), preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: "Отправить сейчас", style: .default, handler: { _ in
+        alert.addAction(UIAlertAction(title: pending.gift.direction == .received ? "Получить сейчас" : "Отправить сейчас", style: .default, handler: { _ in
             VisualGramLocalAppearance.shared.rescheduleGift(id: pending.id, deliveryDate: Int32(clamping: Int64(Date().timeIntervalSince1970)))
         }))
         alert.addAction(UIAlertAction(title: "Изменить время", style: .default, handler: { [weak self] _ in
@@ -373,7 +373,7 @@ private final class VisualGramAppearanceActions {
                 VisualGramLocalAppearance.shared.rescheduleGift(id: pending.id, deliveryDate: time)
             } }
         }))
-        alert.addAction(UIAlertAction(title: "Отменить отправку", style: .destructive, handler: { _ in
+        alert.addAction(UIAlertAction(title: pending.gift.direction == .received ? "Отменить получение" : "Отменить отправку", style: .destructive, handler: { _ in
             VisualGramLocalAppearance.shared.cancelScheduledGift(id: pending.id)
         }))
         alert.addAction(UIAlertAction(title: "Назад", style: .cancel))
