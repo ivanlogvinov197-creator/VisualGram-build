@@ -56,8 +56,12 @@ jobs:
           python3 scripts/prepare_native.py telegram-native --configuration "$RUNNER_TEMP/native-configuration.json"
           python3 scripts/apply_native_features.py telegram-native
           xcrun swiftc -frontend -parse native/*.swift
+          xcrun swiftc -frontend -parse telegram-native/submodules/TelegramUI/Components/ChatTitleView/Sources/ChatTitleComponent.swift
+          xcrun swiftc -frontend -parse telegram-native/submodules/TelegramUI/Components/Gifts/GiftViewScreen/Sources/GiftViewScreen.swift telegram-native/submodules/TelegramUI/Components/Gifts/GiftViewScreen/Sources/GiftViewBuyGift.swift
+          xcrun swiftc -frontend -parse telegram-native/submodules/TelegramUI/Components/Gifts/GiftStoreScreen/Sources/GiftStoreScreen.swift telegram-native/submodules/TelegramUI/Components/Gifts/GiftStoreScreen/Sources/BalanceComponent.swift
           python3 scripts/test_native_delivery.py
           python3 scripts/test_native_upgrade.py
+          python3 scripts/test_native_trading.py
           mkdir -p "$RUNNER_TEMP/native-signing/profiles" "$RUNNER_TEMP/native-signing/certs"
           cp "$RUNNER_TEMP/profile.mobileprovision" "$RUNNER_TEMP/native-signing/profiles/Telegram.mobileprovision"
 
