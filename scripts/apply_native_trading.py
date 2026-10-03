@@ -64,6 +64,7 @@ def apply_trading(root):
 
         fileprivate var isVisualGramGift: Bool {
             if self.visualGramReference != nil { return true }
+            if case let .unique(gift) = self.subject.arguments?.gift, gift.id < 0 { return true }
 ''')
     replace(screen, '                    if arguments.canUpgrade || arguments.upgradeStars != nil || arguments.prepaidUpgradeHash != nil {\n', '                    if arguments.canUpgrade || arguments.upgradeStars != nil || arguments.prepaidUpgradeHash != nil || self.visualGramCanManage {\n')
     replace(screen, '''                        self.upgradePreviewDisposable.add((context.engine.payments.starGiftUpgradePreview(giftId: gift.id)
@@ -174,7 +175,7 @@ def apply_trading(root):
             guard !self.isVisualGramGift else { return }
 ''')
     # Do not fetch server payment forms for a local listing or local catalog purchase.
-    replace(screen, '                    if let _ = arguments.resellAmounts, !isOwn {\n', '                    if let _ = arguments.resellAmounts, !isOwn, !self.isVisualGramGift, VisualGramLocalAppearance.shared.appearance(accountId: context.account.peerId).stars == nil {\n')
+    replace(screen, '                    if let _ = arguments.resellAmounts, !isOwn {\n', '                    if let _ = arguments.resellAmounts, !isOwn, !self.isVisualGramGift, (!VisualGramLocalAppearance.shared.appearance(accountId: context.account.peerId).enabled || VisualGramLocalAppearance.shared.appearance(accountId: context.account.peerId).stars == nil) {\n')
 
     buy = root / 'submodules/TelegramUI/Components/Gifts/GiftViewScreen/Sources/GiftViewBuyGift.swift'
     replace(buy, ') {\n    let presentationData = context.sharedContext.currentPresentationData.with { $0 }\n', ') {\n    if visualGramBuyLocalGift(context: context, recipientPeerId: recipientPeerId, gift: uniqueGift, getController: getController, completion: completion) { return }\n    let presentationData = context.sharedContext.currentPresentationData.with { $0 }\n')
@@ -195,6 +196,16 @@ def apply_trading(root):
         balance.write_text(text, encoding='utf-8')
     market = root / 'submodules/TelegramUI/Components/Gifts/GiftStoreScreen/Sources/GiftStoreScreen.swift'
     replace(market, '                let starsBalance = starsState?.balance ?? .zero\n', '                let appearance = VisualGramLocalAppearance.shared.appearance(accountId: component.context.account.peerId)\n                let starsBalance = (appearance.enabled ? appearance.stars : nil).map { StarsAmount(value: $0, nanos: 0) } ?? starsState?.balance ?? .zero\n')
+    options = root / 'submodules/TelegramUI/Components/Gifts/GiftOptionsScreen/Sources/GiftOptionsScreen.swift'
+    replace(options, '                                    if let availability = gift.availability, availability.resale > 0 {\n', '                                    if (gift.availability?.resale ?? 0) > 0 || VisualGramLocalAppearance.shared.hasLocalGiftListings(giftId: gift.id) {\n')
+    replace(options, 'currentFilter != .transfer && currentVersion', 'currentFilter != .transfer && currentFilter != .resale && currentVersion')
+    replace(options, '                self.starsStateDisposable = (component.starsContext.state\n                |> deliverOnMainQueue).start(next: { [weak self] state in\n', '                self.starsStateDisposable = (combineLatest(component.starsContext.state, VisualGramLocalAppearance.shared.changes)\n                |> deliverOnMainQueue).start(next: { [weak self] state, _ in\n')
+    replace(options, '                if case let .generic(gift) = gift {\n                    if let lockedUntilDate', '''                if case let .generic(gift) = gift {
+                    if self.starsFilter == .resale, VisualGramLocalAppearance.shared.hasLocalGiftListings(giftId: gift.id) {
+                        mainController.push(component.context.sharedContext.makeGiftStoreController(context: component.context, peerId: component.peerId, gift: gift))
+                        return
+                    }
+                    if let lockedUntilDate''')
 
 
 BUY_HELPER = r'''
