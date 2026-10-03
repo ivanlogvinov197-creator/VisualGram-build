@@ -36,6 +36,7 @@ public struct VisualGramGift: Codable, Equatable {
     public enum Direction: String, Codable { case sent, received }
     public var direction: Direction = .sent
     public var counterpartyId: Int64?
+    public var isHistoryOnly: Bool?
     public var date: Int32 = 5
     public var assetIdentifier: String = "test-gift"
     public var identifier: String = "sent:recipient:test-gift"

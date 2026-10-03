@@ -68,6 +68,10 @@ STORE = r'''
 public struct VisualGramAppearance: Codable { var gifts: [VisualGramGift] = [] }
 public final class VisualGramLocalAppearance {
     var values: [Int64: VisualGramAppearance] = [:]
+    func canManageLocalGift(accountId: EnginePeer.Id, reference: StarGiftReference?) -> Bool {
+        guard case let .message(id) = reference, id.peerId == accountId else { return false }
+        return localGift(accountId: accountId, reference: reference)?.isHistoryOnly != true
+    }
     func appearance(accountId: EnginePeer.Id, targetPeerId: EnginePeer.Id? = nil) -> VisualGramAppearance { values[(targetPeerId ?? accountId).toInt64()] ?? VisualGramAppearance() }
     func update(accountId: EnginePeer.Id, targetPeerId: EnginePeer.Id, change: (inout VisualGramAppearance) -> Void) {
         var value = appearance(accountId: accountId, targetPeerId: targetPeerId)
@@ -85,7 +89,8 @@ let reference = original.reference(accountId: owner)
 let attributes: [StarGift.UniqueGift.Attribute] = [.model(1), .model(2), .pattern(3), .pattern(4), .backdrop(5), .backdrop(6)]
 assert(store.upgradeLocalGift(accountId: viewer, reference: reference, preview: .init(attributes: [.model(1)]), keepOriginalInfo: true) == nil, "incomplete preview upgraded")
 assert(store.localGift(accountId: viewer, reference: reference)?.gift == original.gift)
-let result = store.upgradeLocalGift(accountId: viewer, reference: reference, preview: .init(attributes: attributes), keepOriginalInfo: false)!
+assert(store.upgradeLocalGift(accountId: viewer, reference: reference, preview: .init(attributes: attributes), keepOriginalInfo: true) == nil, "non-owner upgraded")
+let result = store.upgradeLocalGift(accountId: owner, reference: reference, preview: .init(attributes: attributes), keepOriginalInfo: false)!
 assert(result.owner == owner && result.reference == reference, "owner or stable reference changed")
 let upgraded = store.localGift(accountId: viewer, reference: reference)!
 assert(upgraded.identifier == original.identifier && upgraded.pinnedToTop == true && upgraded.collectionIds == [8] && upgraded.savedToProfile == true)
@@ -103,7 +108,7 @@ assert(store.localGift(accountId: viewer, reference: reference)?.gift == upgrade
 var combinations = Set<String>()
 for _ in 0..<100 {
     store.values[10] = .init(gifts: [original])
-    let random = store.upgradeLocalGift(accountId: viewer, reference: reference, preview: .init(attributes: attributes), keepOriginalInfo: true)!
+    let random = store.upgradeLocalGift(accountId: owner, reference: reference, preview: .init(attributes: attributes), keepOriginalInfo: true)!
     if case let .unique(unique) = random.gift { combinations.insert(String(describing: unique.attributes)) }
 }
 assert(combinations.count > 1, "all random results identical")

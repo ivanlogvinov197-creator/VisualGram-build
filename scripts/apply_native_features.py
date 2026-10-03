@@ -13,6 +13,7 @@ def apply(root, project):
     peer = root / "submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen"
     shutil.copyfile(project / "native/VisualGramLocalAppearance.swift", core / "VisualGramLocalAppearance.swift")
     shutil.copyfile(project / "native/VisualGramGiftManagement.swift", core / "VisualGramGiftManagement.swift")
+    shutil.copyfile(project / "native/VisualGramGiftTrading.swift", core / "VisualGramGiftTrading.swift")
     shutil.copyfile(project / "native/VisualGramAppearanceController.swift", peer / "Sources/VisualGramAppearanceController.swift")
     shutil.copyfile(project / "native/VisualGramChatGifts.swift", root / "submodules/TelegramUI/Sources/VisualGramChatGifts.swift")
     shutil.copyfile(project / "native/VisualGramGiftDelivery.swift", root / "submodules/TelegramUI/Sources/VisualGramGiftDelivery.swift")
@@ -253,6 +254,8 @@ private func visualGramGiftHasPremium(context: AccountContext) -> Bool {
     apply_shared(root)
     from apply_native_upgrade import apply_upgrade
     apply_upgrade(root)
+    from apply_native_trading import apply_trading
+    apply_trading(root)
 
 
 if __name__ == "__main__":
