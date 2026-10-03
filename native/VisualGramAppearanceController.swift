@@ -46,6 +46,8 @@ private final class VisualGramAppearanceActions {
     let context: AccountContext
     weak var controller: ItemListController?
     let disposables = DisposableSet()
+    let expandedLists = ValuePromise<Int32>(0, ignoreRepeated: true)
+    private var expandedListBits: Int32 = 0
     var targetPeerId: EnginePeer.Id
     var targetTitle = "Мой профиль"
     private var counterpartyId: Int64?
@@ -84,6 +86,11 @@ private final class VisualGramAppearanceActions {
             default: break
             }
         }
+    }
+
+    func toggleList(_ bit: Int32) {
+        self.expandedListBits ^= bit
+        self.expandedLists.set(self.expandedListBits)
     }
 
     func message(_ text: String) {
@@ -134,6 +141,8 @@ private final class VisualGramAppearanceActions {
         case 10: self.editUsername(index: nil)
         case 11: self.editPhone()
         case 12: self.editRating()
+        case 13: self.toggleList(1)
+        case 26: self.toggleList(2)
         case 20: self.configureReceipt { [weak self] in self?.selectOrdinaryGift() }
         case 21: self.configureReceipt { [weak self] in self?.importUniqueGift() }
         case 22: self.configureReceipt(direction: .sent) { [weak self] in self?.selectOrdinaryGift() }
@@ -312,20 +321,29 @@ private final class VisualGramAppearanceActions {
     }
 
     private func previewGift(_ gift: StarGift) {
-        guard let controller = self.controller else { return }
         let local = VisualGramGift(gift: gift, counterpartyId: self.counterpartyId, direction: self.direction, date: self.giftDate, text: self.giftText)
         let targetPeerId = self.targetPeerId
+        self.chooseGiftDelivery(local) { [weak self] deliveryDate in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                self?.showGiftPreview(local, targetPeerId: targetPeerId, deliveryDate: deliveryDate)
+            }
+        }
+    }
+
+    private func showGiftPreview(_ local: VisualGramGift, targetPeerId: EnginePeer.Id, deliveryDate: Int32?) {
+        guard let controller = self.controller else { return }
         let subject: GiftViewScreen.Subject
-        switch gift {
+        switch local.gift {
         case let .unique(value): subject = .uniqueGift(value, nil)
         case let .generic(value): subject = .soldOutGift(value)
         }
-        let preview = GiftViewScreen(context: self.context, subject: subject, customAction: .init(title: local.direction == .sent ? "Отправить локально" : "Получить локально", action: { [weak self] in
+        let title = deliveryDate == nil ? (local.direction == .sent ? "Отправить локально" : "Получить локально") : "Отложить локально"
+        let preview = GiftViewScreen(context: self.context, subject: subject, customAction: .init(title: title, action: { [weak self] in
             guard let self else { return }
-            // The native preview dismisses itself after the custom action.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
-                guard let self else { return }
-                self.chooseGiftDelivery(local, targetPeerId: targetPeerId)
+            if let deliveryDate {
+                VisualGramLocalAppearance.shared.scheduleGift(accountId: self.context.account.peerId, targetPeerId: targetPeerId, gift: local, deliveryDate: deliveryDate)
+            } else {
+                self.deliverGift(local, targetPeerId: targetPeerId)
             }
         }))
         controller.push(preview)
@@ -337,14 +355,14 @@ private final class VisualGramAppearanceActions {
         view.addSubview(ConfettiView(frame: view.bounds))
     }
 
-    private func chooseGiftDelivery(_ gift: VisualGramGift, targetPeerId: EnginePeer.Id) {
+    private func chooseGiftDelivery(_ gift: VisualGramGift, completion: @escaping (Int32?) -> Void) {
         let receiving = gift.direction == .received
         let alert = UIAlertController(title: receiving ? "Получить подарок" : "Отправить подарок", message: "Подарок будет виден только тебе в этом клиенте.", preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: receiving ? "Получить сейчас" : "Отправить сейчас", style: .default, handler: { [weak self] _ in self?.deliverGift(gift, targetPeerId: targetPeerId) }))
+        alert.addAction(UIAlertAction(title: receiving ? "Получить сейчас" : "Отправить сейчас", style: .default, handler: { _ in completion(nil) }))
         alert.addAction(UIAlertAction(title: receiving ? "Отложить получение" : "Отложить отправку", style: .default, handler: { [weak self] _ in
             DispatchQueue.main.async { self?.pickDeliveryDate(currentTime: nil) { [weak self] time in
                 guard let self else { return }
-                VisualGramLocalAppearance.shared.scheduleGift(accountId: self.context.account.peerId, targetPeerId: targetPeerId, gift: gift, deliveryDate: time)
+                completion(time)
             } }
         }))
         alert.addAction(UIAlertAction(title: "Отмена", style: .cancel))
@@ -438,9 +456,9 @@ private final class VisualGramAppearanceActions {
 
 func visualGramAppearanceController(context: AccountContext) -> ViewController {
     let actions = VisualGramAppearanceActions(context: context)
-    let signal = combineLatest(context.sharedContext.presentationData, VisualGramLocalAppearance.shared.changes)
+    let signal = combineLatest(context.sharedContext.presentationData, VisualGramLocalAppearance.shared.changes, actions.expandedLists.get())
     |> deliverOnMainQueue
-    |> map { presentationData, _ -> (ItemListControllerState, (ItemListNodeState, Any)) in
+    |> map { presentationData, _, expanded -> (ItemListControllerState, (ItemListNodeState, Any)) in
         let value = actions.appearance
         var entries: [VisualGramAppearanceEntry] = []
         func add(_ id: Int32, _ section: Int32, _ title: String, _ kind: VisualGramAppearanceEntry.Kind) {
@@ -455,9 +473,11 @@ func visualGramAppearanceController(context: AccountContext) -> ViewController {
         add(6, 0, "Оформление видно только тебе. Оплата и реальные действия используют данные Telegram.", .info)
         add(7, 0, "Чей профиль оформить", .button(actions.targetTitle))
         add(8, 0, "Выбрать исходный значок Major", .button(""))
+        add(9, 0, "Сборка Telegram: \(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "—")", .info)
         add(10, 1, "Добавить NFT-юзернейм", .button(""))
         add(11, 1, "Номер профиля / +888", .button(value.phoneNumber.map { "+\($0.name)" } ?? "Настоящий номер"))
         add(12, 1, "Рейтинг Telegram", .button(value.starRating.map { "Уровень \($0.level)" } ?? "Настоящий рейтинг"))
+        add(13, 1, "Юзернеймы (\(value.usernames.count))", .button(expanded & 1 == 0 ? "Развернуть" : "Свернуть"))
         add(20, 2, "Получить обычный подарок локально", .button(""))
         add(21, 2, "Получить NFT-подарок локально", .button(""))
         add(22, 2, "Отправить обычный подарок локально", .button(""))
@@ -466,7 +486,11 @@ func visualGramAppearanceController(context: AccountContext) -> ViewController {
         add(30, 3, "Визуальные звёзды", .button(value.stars.map(String.init) ?? "Настоящий баланс"))
         add(40, 4, "Сбросить локальное оформление", .button(""))
         add(25, 2, "Отложенные подарки появятся в выбранное время при открытом клиенте или при следующем открытии. Отправка остаётся локальной.", .info)
+        add(26, 2, "Подарки (\(value.gifts.count))", .button(expanded & 2 == 0 ? "Развернуть" : "Свернуть"))
+        if expanded & 1 != 0 {
         for (index, username) in value.usernames.enumerated() { add(1000 + Int32(index), 1, "@\(username.name)", .button("\(Double(username.tonAmount) / 1_000_000_000) TON")) }
+        }
+        if expanded & 2 != 0 {
         for (index, local) in value.gifts.enumerated() {
             let title: String
             switch local.gift {
@@ -474,6 +498,7 @@ func visualGramAppearanceController(context: AccountContext) -> ViewController {
             case let .generic(gift): title = gift.title ?? "Подарок \(gift.id)"
             }
             add(2000 + Int32(index), 2, local.direction == .sent ? "Отправлено: \(title)" : title, .button(""))
+        }
         }
         let queue = VisualGramLocalAppearance.shared.pendingScheduledGifts.filter { $0.targetPeerId == actions.targetPeerId.toInt64() }.sorted { $0.deliveryDate < $1.deliveryDate }
         let formatter = DateFormatter()

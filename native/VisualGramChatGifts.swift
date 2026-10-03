@@ -6,7 +6,7 @@ import TelegramPresentationData
 import ChatHistoryEntry
 
 // These entries exist only in the rendered list. No history or outbox is written.
-func visualGramChatGiftEntries(context: AccountContext, peerId: PeerId, peer: Peer?, view: MessageHistoryView, presentationData: ChatPresentationData) -> [ChatHistoryEntry] {
+func visualGramChatGiftEntries(context: AccountContext, peerId: PeerId, peer: Peer?, accountPeer: EnginePeer?, view: MessageHistoryView, presentationData: ChatPresentationData) -> [ChatHistoryEntry] {
     guard let peer, peerId.namespace == Namespaces.Peer.CloudUser else { return [] }
     let localGifts = VisualGramLocalAppearance.shared.chatGifts(accountId: context.account.peerId, peerId: peerId)
     var result: [ChatHistoryEntry] = []
@@ -30,7 +30,7 @@ func visualGramChatGiftEntries(context: AccountContext, peerId: PeerId, peer: Pe
         }
         var peers = SimpleDictionary<PeerId, Peer>()
         peers[peerId] = peer
-        let ownPeer = view.entries.lazy.compactMap { $0.message.peers[context.account.peerId] }.first
+        let ownPeer = accountPeer?._asPeer() ?? view.entries.lazy.compactMap { $0.message.peers[context.account.peerId] }.first
         if let ownPeer { peers[context.account.peerId] = ownPeer }
         let message = Message(stableId: UInt32.max - 10000 - (hash % 100_000_000), stableVersion: version, id: MessageId(peerId: peerId, namespace: Int32.max - 42, id: -Int32(hash & 0x3fffffff) - 1), globallyUniqueId: nil, groupingKey: nil, groupInfo: nil, threadId: nil, timestamp: local.date, flags: incoming ? [.Incoming] : [], tags: [], globalTags: [], localTags: [], customTags: [], forwardInfo: nil, author: incoming ? peer : ownPeer, text: "", attributes: [], media: [TelegramMediaAction(action: action)], peers: peers, associatedMessages: SimpleDictionary<MessageId, Message>(), associatedMessageIds: [], associatedMedia: [:], associatedThreadInfo: nil, associatedStories: [:])
         result.append(.MessageEntry(message, presentationData, true, nil, .none, ChatMessageEntryAttributes()))

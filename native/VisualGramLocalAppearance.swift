@@ -45,6 +45,7 @@ public struct VisualGramGift: Codable, Equatable {
         self.direction = direction
         self.date = date
         self.text = text
+        self.localIdentifier = UUID().uuidString
     }
 
     public var identifier: String {

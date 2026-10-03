@@ -30,7 +30,15 @@ public extension VisualGramLocalAppearance {
                 var reverse = gift
                 reverse.direction = gift.direction == .received ? .sent : .received
                 reverse.counterpartyId = peerId.toInt64()
-                if !result.contains(where: { $0.assetIdentifier == reverse.assetIdentifier && $0.direction == reverse.direction && $0.date == reverse.date }) { result.append(reverse) }
+                let alreadyPresent = result.contains { existing in
+                    if existing.identifier == reverse.identifier { return true }
+                    // A transferred NFT has separate sent and received records for one event.
+                    if case .unique = reverse.gift {
+                        return existing.assetIdentifier == reverse.assetIdentifier && existing.direction == reverse.direction && existing.date == reverse.date
+                    }
+                    return false
+                }
+                if !alreadyPresent { result.append(reverse) }
             }
         }
         return result
@@ -58,7 +66,13 @@ public extension VisualGramLocalAppearance {
     }
 
     private static func insertGift(_ gift: VisualGramGift, into value: inout VisualGramAppearance) {
-        value.gifts.removeAll { $0.identifier == gift.identifier || (gift.direction == .received && $0.direction == .received && $0.assetIdentifier == gift.assetIdentifier) }
+        value.gifts.removeAll { existing in
+            if existing.identifier == gift.identifier { return true }
+            if case .unique = gift.gift {
+                return gift.direction == .received && existing.direction == .received && existing.isHistoryOnly != true && existing.assetIdentifier == gift.assetIdentifier
+            }
+            return false
+        }
         value.gifts.append(gift)
     }
 
