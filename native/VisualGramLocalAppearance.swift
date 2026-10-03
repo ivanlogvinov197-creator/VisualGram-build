@@ -71,7 +71,7 @@ public struct VisualGramGift: Codable, Equatable {
         let senderId = self.direction == .sent ? accountId : self.counterpartyId.map { EnginePeer.Id($0) }
         var attributes = gift.attributes.filter { $0.attributeType != .originalInfo }
         if self.hidesOriginalInfo != true { attributes.append(.originalInfo(senderPeerId: senderId, recipientPeerId: recipientId, date: self.date, text: self.text.isEmpty ? nil : self.text, entities: nil)) }
-        let prices = self.resaleStars.map { [CurrencyAmount(currency: .stars, amount: StarsAmount(value: $0, nanos: 0))] }
+            let prices = self.resaleStars.map { [CurrencyAmount(amount: StarsAmount(value: $0, nanos: 0), currency: .stars)] }
         return .unique(StarGift.UniqueGift(id: gift.id, giftId: gift.giftId, title: gift.title, number: gift.number, slug: gift.slug, owner: .peerId(recipientId), attributes: attributes, availability: gift.availability, giftAddress: nil, resellAmounts: prices, resellForTonOnly: false, releasedBy: gift.releasedBy, valueAmount: gift.valueAmount, valueCurrency: gift.valueCurrency, valueUsdAmount: gift.valueUsdAmount, flags: gift.flags, themePeerId: gift.themePeerId, peerColor: gift.peerColor, hostPeerId: nil, minOfferStars: nil, craftChancePermille: nil))
     }
 
