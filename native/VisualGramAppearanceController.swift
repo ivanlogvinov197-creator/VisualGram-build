@@ -360,7 +360,7 @@ private final class VisualGramAppearanceActions {
         let alert = UIAlertController(title: receiving ? "Получить подарок" : "Отправить подарок", message: "Подарок будет виден только тебе в этом клиенте.", preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: receiving ? "Получить сейчас" : "Отправить сейчас", style: .default, handler: { _ in completion(nil) }))
         alert.addAction(UIAlertAction(title: receiving ? "Отложить получение" : "Отложить отправку", style: .default, handler: { [weak self] _ in
-            DispatchQueue.main.async { self?.pickDeliveryDate(currentTime: nil) { [weak self] time in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { self?.pickDeliveryDate(currentTime: nil) { [weak self] time in
                 guard let self else { return }
                 completion(time)
             } }
@@ -375,7 +375,8 @@ private final class VisualGramAppearanceActions {
             guard time > Int32(clamping: Int64(Date().timeIntervalSince1970)), time < Int32.max - 1 else { self?.message("Выбери время в будущем."); return }
             completion(time)
         })
-        controller.present(picker, in: .window(.root))
+        let presenter = (controller.navigationController as? NavigationController)?.viewControllers.last as? ViewController ?? controller
+        presenter.present(picker, in: .window(.root))
     }
 
     private func openScheduledGift(index: Int) {
