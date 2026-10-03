@@ -112,15 +112,15 @@ assert(reopened.deliverAllScheduledGifts(now: 900).count == 1, "shared foregroun
 reopened.scheduleGift(accountId: own, targetPeerId: own, gift: gift, deliveryDate: 1000)
 reopened.cancelScheduledGift(id: reopened.pendingScheduledGifts[0].id)
 assert(reopened.deliverAllScheduledGifts(now: 1000).isEmpty, "shared cancellation ignored")
-var incoming = gift
-incoming.direction = .received
-incoming.counterpartyId = secondAccount.toInt64()
-incoming.identifier = "received:30:scheduled"
-reopened.scheduleGift(accountId: secondAccount, targetPeerId: other, gift: incoming, deliveryDate: 1200)
-assert(!reopened.appearance(accountId: other).gifts.contains { $0.identifier == incoming.identifier }, "incoming gift appeared before deadline")
+var scheduledIncoming = gift
+scheduledIncoming.direction = .received
+scheduledIncoming.counterpartyId = secondAccount.toInt64()
+scheduledIncoming.identifier = "received:30:scheduled"
+reopened.scheduleGift(accountId: secondAccount, targetPeerId: other, gift: scheduledIncoming, deliveryDate: 1200)
+assert(!reopened.appearance(accountId: other).gifts.contains { $0.identifier == scheduledIncoming.identifier }, "incoming gift appeared before deadline")
 assert(reopened.deliverAllScheduledGifts(now: 1199).isEmpty)
 assert(reopened.deliverAllScheduledGifts(now: 1200).count == 1)
-let received = reopened.appearance(accountId: other).gifts.first { $0.identifier == incoming.identifier }!
+let received = reopened.appearance(accountId: other).gifts.first { $0.identifier == scheduledIncoming.identifier }!
 assert(received.direction == .received && received.counterpartyId == secondAccount.toInt64() && received.date == 1200)
 assert(reopened.deliverAllScheduledGifts(now: 1201).isEmpty, "incoming delivered twice")
 print("PASS: delayed delivery, deadline, exactly-once, shared profiles, distinct identities, cross-account editing/reset, v2 migration, reschedule, cancellation and restart")
