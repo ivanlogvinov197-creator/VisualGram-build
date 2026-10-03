@@ -59,6 +59,7 @@ jobs:
           xcrun swiftc -frontend -parse telegram-native/submodules/TelegramUI/Components/ChatTitleView/Sources/ChatTitleComponent.swift
           xcrun swiftc -frontend -parse telegram-native/submodules/TelegramUI/Components/Gifts/GiftViewScreen/Sources/GiftViewScreen.swift telegram-native/submodules/TelegramUI/Components/Gifts/GiftViewScreen/Sources/GiftViewBuyGift.swift
           xcrun swiftc -frontend -parse telegram-native/submodules/TelegramUI/Components/Gifts/GiftStoreScreen/Sources/GiftStoreScreen.swift telegram-native/submodules/TelegramUI/Components/Gifts/GiftStoreScreen/Sources/BalanceComponent.swift
+          xcrun swiftc -frontend -parse telegram-native/submodules/TelegramStringFormatting/Sources/ServiceMessageStrings.swift telegram-native/submodules/TelegramUI/Components/Stars/StarsBalanceOverlayComponent/Sources/StarsBalanceOverlayComponent.swift
           python3 scripts/test_native_delivery.py
           python3 scripts/test_native_upgrade.py
           python3 scripts/test_native_trading.py
