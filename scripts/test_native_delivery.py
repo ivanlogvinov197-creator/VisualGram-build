@@ -2,6 +2,7 @@
 from pathlib import Path
 import subprocess
 import tempfile
+from test_native_upgrade import STUBS as ENGINE_STUBS
 
 
 def source():
@@ -15,32 +16,17 @@ def source():
     migration = appearance[appearance.index("    static func migrateLegacyAppearances("):appearance.index("    public var changes:")]
     access = appearance[appearance.index("    public func appearance("):appearance.index("    func updateValues(")]
     dispatch = appearance[appearance.index("    public var pendingScheduledGifts:"):appearance.index("    public func appearance(")]
-    return STUBS + model + appearance_model + STORE + migration + dispatch + access + reset + "}\npublic extension VisualGramLocalAppearance {\n" + methods + "}\n" + CHECKS
+    gift_model = appearance[appearance.index("public struct VisualGramGift:"):appearance.index("    public func displayGift(")] + "}\n"
+    return ENGINE_STUBS + STUBS + gift_model + model + appearance_model + STORE + migration + dispatch + access + reset + "}\npublic extension VisualGramLocalAppearance {\n" + methods + "}\n" + CHECKS
 
 
 STUBS = r'''
 import Foundation
-public enum EnginePeer {
-    public struct Id: Codable, Hashable {
-        let value: Int64
-        public init(_ value: Int64) { self.value = value }
-        public func toInt64() -> Int64 { self.value }
-    }
-}
 public typealias VisualGramUsername = Int
 public typealias PeerVerification = Int
 public typealias PeerEmojiStatus = Int
 public typealias TelegramStarRating = Int
 public typealias VisualGramGiftCollection = Int
-public struct VisualGramGift: Codable, Equatable {
-    public enum Direction: String, Codable { case sent, received }
-    public var direction: Direction = .sent
-    public var counterpartyId: Int64?
-    public var isHistoryOnly: Bool?
-    public var date: Int32 = 5
-    public var assetIdentifier: String = "test-gift"
-    public var identifier: String = "sent:recipient:test-gift"
-}
 '''
 
 STORE = r'''
@@ -53,7 +39,8 @@ public final class VisualGramLocalAppearance {
 CHECKS = r'''
 let store = VisualGramLocalAppearance()
 let own = EnginePeer.Id(10), other = EnginePeer.Id(20), secondAccount = EnginePeer.Id(30)
-let gift = VisualGramGift()
+let ordinary = StarGift.generic(.init(id: 42, title: "Bear", availability: nil, releasedBy: nil))
+let gift = VisualGramGift(gift: ordinary, counterpartyId: 20, direction: .sent, date: 5, text: "")
 store.scheduleGift(accountId: own, targetPeerId: own, gift: gift, deliveryDate: 100)
 assert(store.appearance(accountId: own).gifts.isEmpty, "scheduled card leaked before delivery")
 assert(store.deliverScheduledGifts(accountId: own, now: 99).isEmpty, "delivered too early")
@@ -115,7 +102,7 @@ assert(reopened.deliverAllScheduledGifts(now: 1000).isEmpty, "shared cancellatio
 var scheduledIncoming = gift
 scheduledIncoming.direction = .received
 scheduledIncoming.counterpartyId = secondAccount.toInt64()
-scheduledIncoming.identifier = "received:30:scheduled"
+scheduledIncoming.localIdentifier = "received:30:scheduled"
 reopened.scheduleGift(accountId: secondAccount, targetPeerId: other, gift: scheduledIncoming, deliveryDate: 1200)
 assert(!reopened.appearance(accountId: other).gifts.contains { $0.identifier == scheduledIncoming.identifier }, "incoming gift appeared before deadline")
 assert(reopened.deliverAllScheduledGifts(now: 1199).isEmpty)
@@ -123,7 +110,27 @@ assert(reopened.deliverAllScheduledGifts(now: 1200).count == 1)
 let received = reopened.appearance(accountId: other).gifts.first { $0.identifier == scheduledIncoming.identifier }!
 assert(received.direction == .received && received.counterpartyId == secondAccount.toInt64() && received.date == 1200)
 assert(reopened.deliverAllScheduledGifts(now: 1201).isEmpty, "incoming delivered twice")
-print("PASS: delayed delivery, deadline, exactly-once, shared profiles, distinct identities, cross-account editing/reset, v2 migration, reschedule, cancellation and restart")
+let duplicates = VisualGramLocalAppearance()
+let first = VisualGramGift(gift: ordinary, counterpartyId: 20, date: 1300, text: "same")
+let second = VisualGramGift(gift: ordinary, counterpartyId: 20, date: 1300, text: "same")
+assert(first.identifier != second.identifier && first.reference(accountId: own) != second.reference(accountId: own), "two ordinary instances share an identity")
+duplicates.addGift(accountId: own, targetPeerId: own, gift: first)
+duplicates.addGift(accountId: own, targetPeerId: own, gift: second)
+duplicates.addGift(accountId: own, targetPeerId: own, gift: first)
+assert(duplicates.appearance(accountId: own).gifts.count == 2, "same ordinary gifts replaced each other or retry duplicated an instance")
+assert(duplicates.chatGifts(accountId: own, peerId: other).count == 2)
+assert(duplicates.chatGifts(accountId: other, peerId: own).count == 2, "mirror lost identical gifts")
+let third = VisualGramGift(gift: ordinary, counterpartyId: 20, direction: .sent, date: 5, text: "")
+let fourth = VisualGramGift(gift: ordinary, counterpartyId: 20, direction: .sent, date: 5, text: "")
+duplicates.scheduleGift(accountId: own, targetPeerId: own, gift: third, deliveryDate: 1400)
+duplicates.scheduleGift(accountId: own, targetPeerId: own, gift: fourth, deliveryDate: 1400)
+let restart = VisualGramLocalAppearance()
+restart.values = try JSONDecoder().decode([String: VisualGramAppearance].self, from: JSONEncoder().encode(duplicates.values))
+assert(restart.deliverAllScheduledGifts(now: 1399).isEmpty)
+assert(restart.deliverAllScheduledGifts(now: 1400).count == 2, "one scheduled ordinary gift replaced the other")
+assert(restart.deliverAllScheduledGifts(now: 1401).isEmpty)
+assert(restart.appearance(accountId: own).gifts.count == 4)
+print("PASS: distinct ordinary copies/references, reciprocal chats, simultaneous schedules/restart, exactly-once delivery, shared profiles and migration")
 '''
 
 

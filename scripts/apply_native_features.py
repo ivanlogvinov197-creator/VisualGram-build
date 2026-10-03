@@ -256,6 +256,8 @@ private func visualGramGiftHasPremium(context: AccountContext) -> Bool {
     apply_upgrade(root)
     from apply_native_trading import apply_trading
     apply_trading(root)
+    from apply_native_revision import apply_revision
+    apply_revision(root)
 
 
 if __name__ == "__main__":
