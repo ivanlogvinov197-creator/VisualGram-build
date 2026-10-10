@@ -5,16 +5,29 @@ public enum VisualGramGiftPurchaseResult: Equatable {
 }
 
 public extension VisualGramLocalAppearance {
+    static let localGiftTransferStars: Int64 = 25
+
+    static func recordStarsTransaction(value: inout VisualGramAppearance, amount: Int64, kind: VisualGramGift.StarsTransaction.Kind, peerId: EnginePeer.Id?, gift: StarGift?, title: String? = nil, now: Int32) {
+        guard amount != 0 else { return }
+        var history = value.starsHistory ?? []
+        history.append(.init(id: UUID().uuidString, date: now, amount: amount, kind: kind, title: title, peerId: peerId?.toInt64(), gift: gift))
+        value.starsHistory = history
+    }
+
     func localReference(messageId: EngineMessage.Id) -> StarGiftReference? {
         guard messageId.namespace == Int32.max - 42 else { return nil }
+        var historyReference: StarGiftReference?
         for (key, value) in self.snapshotValues() {
             guard let rawId = Int64(key) else { continue }
             for gift in value.gifts {
                 let reference = gift.reference(accountId: EnginePeer.Id(rawId))
-                if case let .message(id) = reference, id.id == messageId.id { return reference }
+                if case let .message(id) = reference, id.id == messageId.id {
+                    if gift.direction == .received && gift.isHistoryOnly != true { return reference }
+                    historyReference = historyReference ?? reference
+                }
             }
         }
-        return nil
+        return historyReference
     }
 
     func canManageLocalGift(accountId: EnginePeer.Id, reference: StarGiftReference?) -> Bool {
@@ -46,6 +59,10 @@ public extension VisualGramLocalAppearance {
             guard let index = values[key]?.gifts.firstIndex(where: { $0.reference(accountId: accountId) == reference }),
                   let local = values[key]?.gifts[index], local.direction == .received,
                   local.isHistoryOnly != true, case .unique = local.gift else { return }
+            guard var owner = values[key], owner.enabled, let balance = owner.stars, balance >= Self.localGiftTransferStars else { return }
+            owner.stars = balance - Self.localGiftTransferStars
+            Self.recordStarsTransaction(value: &owner, amount: -Self.localGiftTransferStars, kind: .transfer, peerId: recipientPeerId, gift: local.gift, now: now)
+            values[key] = owner
             Self.moveLocalGift(values: &values, ownerId: accountId, index: index, recipientId: recipientPeerId, now: now)
             transferred = true
         }
@@ -89,28 +106,87 @@ public extension VisualGramLocalAppearance {
                 let (newBalance, overflow) = (values[sellerKey]?.stars ?? 0).addingReportingOverflow(price)
                 guard !overflow else { result = .invalid; return }
                 buyer.stars = balance - price
+                Self.recordStarsTransaction(value: &buyer, amount: -price, kind: .purchase, peerId: sellerId, gift: .unique(gift), now: now)
                 values[buyerKey] = buyer
                 values[sellerKey]?.stars = newBalance
-                Self.moveLocalGift(values: &values, ownerId: sellerId, index: index, recipientId: recipientPeerId, now: now)
+                if var sellerValue = values[sellerKey] {
+                    Self.recordStarsTransaction(value: &sellerValue, amount: price, kind: .sale, peerId: accountId, gift: .unique(gift), now: now)
+                    values[sellerKey] = sellerValue
+                }
+                Self.moveLocalGift(values: &values, ownerId: sellerId, index: index, recipientId: recipientPeerId, now: now, purchaseStars: price, buyerId: accountId)
             } else {
                 // A catalog purchase creates a local copy. Existing local assets cannot be bought twice.
                 guard !requireListing, !values.values.contains(where: { $0.gifts.contains { $0.assetIdentifier == "unique:\(gift.slug)" } }) else { return }
                 buyer.stars = balance - price
+                Self.recordStarsTransaction(value: &buyer, amount: -price, kind: .purchase, peerId: recipientPeerId, gift: .unique(gift), now: now)
                 values[buyerKey] = buyer
                 let targetKey = String(recipientPeerId.toInt64())
                 var target = values[targetKey] ?? VisualGramAppearance()
                 target.enabled = true
-                var local = VisualGramGift(gift: .unique(gift), counterpartyId: nil, date: now, text: "")
+                var local = VisualGramGift(gift: .unique(gift), counterpartyId: accountId.toInt64(), date: now, text: "")
                 local.localIdentifier = UUID().uuidString
+                local.purchaseStars = price
+                local.purchaseBuyerId = accountId.toInt64()
                 target.gifts.append(local)
                 values[targetKey] = target
+                if recipientPeerId != accountId {
+                    var outgoing = local
+                    outgoing.direction = .sent
+                    outgoing.counterpartyId = recipientPeerId.toInt64()
+                    outgoing.isHistoryOnly = true
+                    values[buyerKey]?.gifts.append(outgoing)
+                }
             }
             result = .success
         }
         return result
     }
 
-    private static func moveLocalGift(values: inout [String: VisualGramAppearance], ownerId: EnginePeer.Id, index: Int, recipientId: EnginePeer.Id, now: Int32) {
+    func buyLocalOrdinaryGift(accountId: EnginePeer.Id, recipientPeerId: EnginePeer.Id, gift: StarGift.Gift, text: String, includeUpgrade: Bool, preview: StarGiftUpgradePreview?, hasPremium: Bool = false, now: Int32) -> VisualGramGiftPurchaseResult {
+        guard gift.price > 0, gift.soldOut == nil, (gift.availability?.remains ?? 1) > 0,
+              (gift.perUserLimit?.remains ?? 1) > 0, !gift.flags.contains(.isAuction),
+              (gift.lockedUntilDate ?? 0) <= now else { return .unavailable }
+        let (price, overflow) = gift.price.addingReportingOverflow(includeUpgrade ? (gift.upgradeStars ?? 0) : 0)
+        guard !overflow, price > 0, price <= Int64(Int32.max) else { return .invalid }
+        let purchased: StarGift
+        if includeUpgrade {
+            guard let preview, let unique = Self.makeUpgradedGift(gift, preview: preview, ownerId: recipientPeerId) else { return .unavailable }
+            purchased = .unique(unique)
+        } else { purchased = .generic(gift) }
+        var result: VisualGramGiftPurchaseResult = .invalid
+        self.updateValues { values in
+            let buyerKey = String(accountId.toInt64()), targetKey = String(recipientPeerId.toInt64())
+            guard var buyer = values[buyerKey], buyer.enabled, let balance = buyer.stars else { return }
+            if gift.flags.contains(.requiresPremium), !buyer.premium && !hasPremium { result = .unavailable; return }
+            let countKey = String(gift.id)
+            let previous = Int(buyer.giftPurchaseCounts?[countKey] ?? 0)
+            if let limit = gift.perUserLimit, previous >= Int(limit.remains) { result = .unavailable; return }
+            if let availability = gift.availability, previous >= Int(availability.remains) { result = .unavailable; return }
+            guard balance >= price else { result = .insufficientBalance; return }
+            buyer.stars = balance - price
+            Self.recordStarsTransaction(value: &buyer, amount: -price, kind: .purchase, peerId: recipientPeerId, gift: purchased, now: now)
+            buyer.giftPurchaseCounts = buyer.giftPurchaseCounts ?? [:]
+            buyer.giftPurchaseCounts?[countKey] = Int32(clamping: previous + 1)
+            values[buyerKey] = buyer
+            var target = values[targetKey] ?? VisualGramAppearance()
+            target.enabled = true
+            var local = VisualGramGift(gift: purchased, counterpartyId: accountId.toInt64(), date: now, text: text)
+            local.purchaseStars = price
+            local.purchaseBuyerId = accountId.toInt64()
+            target.gifts.append(local)
+            values[targetKey] = target
+            if recipientPeerId != accountId {
+                local.direction = .sent
+                local.counterpartyId = recipientPeerId.toInt64()
+                local.isHistoryOnly = true
+                values[buyerKey]?.gifts.append(local)
+            }
+            result = .success
+        }
+        return result
+    }
+
+    private static func moveLocalGift(values: inout [String: VisualGramAppearance], ownerId: EnginePeer.Id, index: Int, recipientId: EnginePeer.Id, now: Int32, purchaseStars: Int64? = nil, buyerId: EnginePeer.Id? = nil) {
         let ownerKey = String(ownerId.toInt64()), targetKey = String(recipientId.toInt64())
         guard var owner = values[ownerKey], owner.gifts.indices.contains(index) else { return }
         let original = owner.gifts[index]
@@ -127,6 +203,8 @@ public extension VisualGramLocalAppearance {
         outgoing.isTransferred = true
         outgoing.isHistoryOnly = true
         outgoing.resaleStars = nil
+        outgoing.purchaseStars = buyerId == recipientId ? purchaseStars : nil
+        outgoing.purchaseBuyerId = buyerId == recipientId ? buyerId?.toInt64() : nil
         owner.gifts.append(outgoing)
         if case let .unique(gift) = original.gift, case let .starGift(id, _, _, _, _, _, _, _, _) = owner.emojiStatus?.content, id == gift.id {
             owner.overridesEmojiStatus = true
@@ -140,15 +218,25 @@ public extension VisualGramLocalAppearance {
         received.localIdentifier = original.identifier
         received.direction = .received
         received.counterpartyId = ownerId.toInt64()
+        if let buyerId, buyerId != recipientId { received.counterpartyId = buyerId.toInt64() }
         received.date = now
         received.isHistoryOnly = false
         received.isTransferred = true
         received.resaleStars = nil
+        received.purchaseStars = purchaseStars
+        received.purchaseBuyerId = buyerId?.toInt64()
         received.pinnedToTop = false
         received.savedToProfile = true
         received.collectionIds = nil
         target.gifts.append(received)
         values[targetKey] = target
+        if let buyerId, buyerId != recipientId && buyerId != ownerId {
+            var purchase = received
+            purchase.direction = .sent
+            purchase.counterpartyId = recipientId.toInt64()
+            purchase.isHistoryOnly = true
+            values[String(buyerId.toInt64())]?.gifts.append(purchase)
+        }
     }
 
     func hasLocalGiftListings(giftId: Int64) -> Bool {

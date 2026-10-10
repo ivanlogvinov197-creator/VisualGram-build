@@ -25,7 +25,7 @@ public extension VisualGramLocalAppearance {
         let own = self.appearance(accountId: accountId)
         let other = self.appearance(accountId: accountId, targetPeerId: peerId)
         var result = own.enabled ? own.gifts.filter { $0.counterpartyId == peerId.toInt64() } : []
-        if other.enabled {
+        if other.enabled, peerId != accountId {
             for gift in other.gifts where gift.counterpartyId == accountId.toInt64() {
                 var reverse = gift
                 reverse.direction = gift.direction == .received ? .sent : .received
@@ -59,10 +59,46 @@ public extension VisualGramLocalAppearance {
     }
 
     func addGift(accountId: EnginePeer.Id, targetPeerId: EnginePeer.Id, gift: VisualGramGift) {
+        self.addGifts(accountId: accountId, targetPeerId: targetPeerId, gifts: [gift])
+    }
+
+    func addGifts(accountId: EnginePeer.Id, targetPeerId: EnginePeer.Id, gifts: [VisualGramGift]) {
         self.update(accountId: accountId, targetPeerId: targetPeerId) { value in
             value.enabled = true
-            Self.insertGift(gift, into: &value)
+            for gift in gifts { Self.insertGift(gift, into: &value) }
         }
+    }
+
+    @discardableResult
+    func moveGift(accountId: EnginePeer.Id, targetPeerId: EnginePeer.Id, identifier: String, offset: Int) -> Bool {
+        var moved = false
+        self.update(accountId: accountId, targetPeerId: targetPeerId) { value in
+            guard let index = value.gifts.firstIndex(where: { $0.identifier == identifier }) else { return }
+            let destination = index + offset
+            guard value.gifts.indices.contains(destination), destination != index else { return }
+            let gift = value.gifts.remove(at: index)
+            value.gifts.insert(gift, at: destination)
+            moved = true
+        }
+        return moved
+    }
+
+    static func nftSlugs(from input: String) -> [String]? {
+        let tokens = input.components(separatedBy: CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: ",;"))).filter { !$0.isEmpty }
+        guard !tokens.isEmpty, tokens.count <= 100 else { return nil }
+        var result: [String] = []
+        var seen = Set<String>()
+        for token in tokens {
+            let slug: String
+            if token.contains("/") {
+                let urlText = token.hasPrefix("http") ? token : "https://" + token
+                guard let url = URL(string: urlText), ["t.me", "telegram.me"].contains(url.host?.lowercased() ?? ""), url.path.hasPrefix("/nft/") else { return nil }
+                slug = url.lastPathComponent
+            } else { slug = token }
+            guard slug.range(of: "^[A-Za-z0-9]+-[0-9]+$", options: .regularExpression) != nil else { return nil }
+            if seen.insert(slug.lowercased()).inserted { result.append(slug) }
+        }
+        return result
     }
 
     private static func insertGift(_ gift: VisualGramGift, into value: inout VisualGramAppearance) {
@@ -77,15 +113,23 @@ public extension VisualGramLocalAppearance {
     }
 
     func scheduleGift(accountId: EnginePeer.Id, targetPeerId: EnginePeer.Id, gift: VisualGramGift, deliveryDate: Int32) {
-        self.update(accountId: accountId, targetPeerId: targetPeerId) { $0.enabled = true }
+        self.scheduleGifts(accountId: accountId, targetPeerId: targetPeerId, gifts: [gift], deliveryDate: deliveryDate)
+    }
+
+    func scheduleGifts(accountId: EnginePeer.Id, targetPeerId: EnginePeer.Id, gifts: [VisualGramGift], deliveryDate: Int32) {
         self.updateValues { values in
+            let targetKey = String(targetPeerId.toInt64())
+            var target = values[targetKey] ?? VisualGramAppearance()
+            target.enabled = true
+            values[targetKey] = target
+            let identifiers = Set(gifts.map { $0.identifier })
             for key in Array(values.keys) {
-                values[key]?.scheduledGifts?.removeAll { $0.targetPeerId == targetPeerId.toInt64() && $0.gift.identifier == gift.identifier }
+                values[key]?.scheduledGifts?.removeAll { $0.targetPeerId == targetPeerId.toInt64() && identifiers.contains($0.gift.identifier) }
             }
             let accountKey = String(accountId.toInt64())
             var value = values[accountKey] ?? VisualGramAppearance()
             var queue = value.scheduledGifts ?? []
-            queue.append(VisualGramScheduledGift(targetPeerId: targetPeerId.toInt64(), gift: gift, deliveryDate: deliveryDate))
+            queue.append(contentsOf: gifts.map { VisualGramScheduledGift(targetPeerId: targetPeerId.toInt64(), gift: $0, deliveryDate: deliveryDate) })
             value.scheduledGifts = queue
             values[accountKey] = value
         }
@@ -130,17 +174,7 @@ public extension VisualGramLocalAppearance {
         guard self.canManageLocalGift(accountId: accountId, reference: reference),
               let local = self.localGift(accountId: accountId, reference: reference), local.direction == .received,
               case let .generic(generic) = local.gift, case let .message(messageId) = reference else { return nil }
-        guard let model = preview.attributes.filter({ $0.attributeType == .model }).randomElement(),
-              let pattern = preview.attributes.filter({ $0.attributeType == .pattern }).randomElement(),
-              let backdrop = preview.attributes.filter({ $0.attributeType == .backdrop }).randomElement() else { return nil }
-        let total = max(1, generic.availability?.total ?? 100000)
-        let unique = StarGift.UniqueGift(id: -Int64.random(in: 1 ... Int64.max), giftId: generic.id,
-            title: generic.title ?? "Коллекционный подарок", number: Int32.random(in: 1 ... total),
-            slug: "VisualGram-\(UUID().uuidString)", owner: .peerId(messageId.peerId), attributes: [model, pattern, backdrop],
-            availability: .init(issued: 1, total: total), giftAddress: nil, resellAmounts: nil,
-            resellForTonOnly: false, releasedBy: generic.releasedBy, valueAmount: nil, valueCurrency: nil,
-            valueUsdAmount: nil, flags: [], themePeerId: nil, peerColor: nil, hostPeerId: nil,
-            minOfferStars: nil, craftChancePermille: nil)
+        guard let unique = Self.makeUpgradedGift(generic, preview: preview, ownerId: messageId.peerId) else { return nil }
         var result: VisualGramGift?
         self.update(accountId: accountId, targetPeerId: messageId.peerId) { value in
             guard let index = value.gifts.firstIndex(where: { $0.identifier == local.identifier }),
@@ -151,6 +185,21 @@ public extension VisualGramLocalAppearance {
             result = value.gifts[index]
         }
         return result?.profileGift(accountId: messageId.peerId, sender: nil)
+    }
+
+    static func makeUpgradedGift(_ generic: StarGift.Gift, preview: StarGiftUpgradePreview, ownerId: EnginePeer.Id) -> StarGift.UniqueGift? {
+        guard generic.upgradeStars != nil,
+              let model = preview.attributes.filter({ $0.attributeType == .model }).randomElement(),
+              let pattern = preview.attributes.filter({ $0.attributeType == .pattern }).randomElement(),
+              let backdrop = preview.attributes.filter({ $0.attributeType == .backdrop }).randomElement() else { return nil }
+        let total = max(1, generic.availability?.total ?? 100000)
+        return StarGift.UniqueGift(id: -Int64.random(in: 1 ... Int64.max), giftId: generic.id,
+            title: generic.title ?? "Коллекционный подарок", number: Int32.random(in: 1 ... total),
+            slug: "Gift-\(UUID().uuidString)", owner: .peerId(ownerId), attributes: [model, pattern, backdrop],
+            availability: .init(issued: 1, total: total), giftAddress: nil, resellAmounts: nil,
+            resellForTonOnly: false, releasedBy: generic.releasedBy, valueAmount: nil, valueCurrency: nil,
+            valueUsdAmount: nil, flags: [], themePeerId: nil, peerColor: nil, hostPeerId: nil,
+            minOfferStars: nil, craftChancePermille: nil)
     }
 
     @discardableResult
@@ -178,9 +227,10 @@ public extension VisualGramLocalAppearance {
     func profileState(_ server: ProfileGiftsContext.State, accountId: EnginePeer.Id, peerId: EnginePeer.Id, collectionId: Int32?, senders: [Int64: EnginePeer] = [:]) -> ProfileGiftsContext.State {
         let value = self.appearance(accountId: accountId, targetPeerId: peerId)
         guard value.enabled else { return server }
-        let local = value.gifts.filter { $0.direction == .received && $0.isHistoryOnly != true && (collectionId == nil || ($0.collectionIds ?? []).contains(collectionId!)) }
+        let owned = value.gifts.filter { $0.direction == .received && $0.isHistoryOnly != true && (collectionId == nil || ($0.collectionIds ?? []).contains(collectionId!)) }
+        let local = owned.filter { accountId == peerId || $0.savedToProfile != false }
         var result = server
-        let localSlugs = Set(local.compactMap { item -> String? in
+        let localSlugs = Set(owned.compactMap { item -> String? in
             if case let .unique(gift) = item.gift { return gift.slug }; return nil
         })
         let keepRemote: (ProfileGiftsContext.State.StarGift) -> Bool = { item in
@@ -215,7 +265,7 @@ public extension VisualGramLocalAppearance {
     func collection(accountId: EnginePeer.Id, targetPeerId: EnginePeer.Id? = nil, id: Int32) -> StarGiftCollection? {
         let value = self.appearance(accountId: accountId, targetPeerId: targetPeerId)
         guard let collection = value.collections?.first(where: { $0.id == id }) else { return nil }
-        let gifts = value.gifts.filter { $0.direction == .received && $0.isHistoryOnly != true && ($0.collectionIds ?? []).contains(id) }
+        let gifts = value.gifts.filter { $0.direction == .received && $0.isHistoryOnly != true && (accountId == (targetPeerId ?? accountId) || $0.savedToProfile != false) && ($0.collectionIds ?? []).contains(id) }
         var icon: TelegramMediaFile?
         if let first = gifts.first {
             switch first.gift {
@@ -266,7 +316,7 @@ public extension VisualGramLocalAppearance {
         guard value.enabled else { return server }
         var result = server
         result.collections = (value.collections ?? []).compactMap { self.collection(accountId: accountId, targetPeerId: peerId, id: $0.id) } + server.collections.map { collection in
-            let added = value.gifts.filter { $0.direction == .received && $0.isHistoryOnly != true && ($0.collectionIds ?? []).contains(collection.id) }.count
+            let added = value.gifts.filter { $0.direction == .received && $0.isHistoryOnly != true && (accountId == peerId || $0.savedToProfile != false) && ($0.collectionIds ?? []).contains(collection.id) }.count
             return StarGiftCollection(id: collection.id, title: collection.title, icon: collection.icon, count: collection.count + Int32(added), hash: collection.hash)
         }
         return result

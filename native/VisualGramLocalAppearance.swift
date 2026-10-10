@@ -23,6 +23,16 @@ public struct VisualGramUsername: Codable, Equatable {
 }
 
 public struct VisualGramGift: Codable, Equatable {
+    public struct StarsTransaction: Codable, Equatable {
+        public enum Kind: String, Codable { case topUp, purchase, sale, transfer, adjustment }
+        public var id: String
+        public var date: Int32
+        public var amount: Int64
+        public var kind: Kind
+        public var title: String?
+        public var peerId: Int64?
+        public var gift: StarGift?
+    }
     public enum Direction: String, Codable { case received, sent }
     public var gift: StarGift
     public var counterpartyId: Int64?
@@ -38,6 +48,8 @@ public struct VisualGramGift: Codable, Equatable {
     public var isHistoryOnly: Bool?
     public var isTransferred: Bool?
     public var resaleStars: Int64?
+    public var purchaseStars: Int64?
+    public var purchaseBuyerId: Int64?
 
     public init(gift: StarGift, counterpartyId: Int64?, direction: Direction = .received, date: Int32, text: String) {
         self.gift = gift
@@ -80,7 +92,7 @@ public struct VisualGramGift: Codable, Equatable {
         let canUpgrade: Bool
         if case let .generic(gift) = self.gift { canUpgrade = gift.upgradeStars != nil && self.direction == .received && self.isHistoryOnly != true } else { canUpgrade = false }
         let transferStars: Int64?
-        if case .unique = self.gift, self.direction == .received, self.isHistoryOnly != true { transferStars = 0 } else { transferStars = nil }
+        if case .unique = self.gift, self.direction == .received, self.isHistoryOnly != true { transferStars = VisualGramLocalAppearance.localGiftTransferStars } else { transferStars = nil }
         return ProfileGiftsContext.State.StarGift(gift: self.displayGift(accountId: accountId), reference: self.reference(accountId: accountId), fromPeer: sender, date: self.date, text: self.text.isEmpty ? nil : self.text, entities: nil, nameHidden: false, savedToProfile: self.savedToProfile ?? true, pinnedToTop: self.pinnedToTop ?? false, convertStars: nil, canUpgrade: canUpgrade, canExportDate: nil, upgradeStars: nil, transferStars: transferStars, canTransferDate: nil, canResaleDate: nil, collectionIds: self.collectionIds, prepaidUpgradeHash: nil, upgradeSeparate: false, dropOriginalDetailsStars: nil, number: nil, isRefunded: false, canCraftAt: nil)
     }
 }
@@ -95,6 +107,8 @@ public struct VisualGramAppearance: Codable, Equatable {
     public var emojiStatus: PeerEmojiStatus?
     public var gifts: [VisualGramGift] = []
     public var stars: Int64?
+    public var giftPurchaseCounts: [String: Int32]?
+    public var starsHistory: [VisualGramGift.StarsTransaction]?
     public var collections: [VisualGramGiftCollection]?
     public var scheduledGifts: [VisualGramScheduledGift]?
     public var peerOverrides: [String: VisualGramAppearance]?

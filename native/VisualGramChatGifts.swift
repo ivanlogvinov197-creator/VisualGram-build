@@ -17,6 +17,7 @@ func visualGramChatGiftEntries(context: AccountContext, peerId: PeerId, peer: Pe
         for byte in local.identifier.utf8 { hash = (hash ^ UInt32(byte)) &* 16777619 }
         var version = UInt32(bitPattern: local.date)
         for byte in local.text.utf8 { version = (version ^ UInt32(byte)) &* 16777619 }
+        for byte in "\(local.assetIdentifier):\(local.purchaseStars ?? 0):\(local.savedToProfile ?? true)".utf8 { version = (version ^ UInt32(byte)) &* 16777619 }
         let gift = local.displayGift(accountId: context.account.peerId)
         let incoming = local.direction == .received
         let senderId = incoming ? peerId : context.account.peerId
@@ -26,13 +27,15 @@ func visualGramChatGiftEntries(context: AccountContext, peerId: PeerId, peer: Pe
         case .generic:
             action = .starGift(gift: gift, convertStars: nil, text: local.text.isEmpty ? nil : local.text, entities: nil, nameHidden: false, savedToProfile: incoming, converted: false, upgraded: false, canUpgrade: false, upgradeStars: nil, isRefunded: false, isPrepaidUpgrade: false, upgradeMessageId: nil, peerId: nil, senderId: senderId, savedId: nil, prepaidUpgradeHash: nil, giftMessageId: nil, upgradeSeparate: false, isAuctionAcquired: false, toPeerId: recipientId, number: nil)
         case .unique:
-            action = .starGiftUnique(gift: gift, isUpgrade: false, isTransferred: local.isTransferred ?? false, savedToProfile: incoming, canExportDate: nil, transferStars: nil, isRefunded: false, isPrepaidUpgrade: false, peerId: nil, senderId: senderId, savedId: nil, resaleAmount: nil, canTransferDate: nil, canResaleDate: nil, dropOriginalDetailsStars: nil, assigned: false, fromOffer: false, canCraftAt: nil, isCrafted: false)
+            action = .starGiftUnique(gift: gift, isUpgrade: false, isTransferred: local.isTransferred ?? false, savedToProfile: incoming, canExportDate: nil, transferStars: nil, isRefunded: false, isPrepaidUpgrade: false, peerId: nil, senderId: local.purchaseStars == nil ? senderId : nil, savedId: nil, resaleAmount: local.purchaseStars.map { CurrencyAmount(amount: StarsAmount(value: $0, nanos: 0), currency: .stars) }, canTransferDate: nil, canResaleDate: nil, dropOriginalDetailsStars: nil, assigned: false, fromOffer: false, canCraftAt: nil, isCrafted: false)
         }
         var peers = SimpleDictionary<PeerId, Peer>()
         peers[peerId] = peer
         let ownPeer = accountPeer?._asPeer() ?? view.entries.lazy.compactMap { $0.message.peers[context.account.peerId] }.first
         if let ownPeer { peers[context.account.peerId] = ownPeer }
-        let message = Message(stableId: UInt32.max - 10000 - (hash % 100_000_000), stableVersion: version, id: MessageId(peerId: peerId, namespace: Int32.max - 42, id: -Int32(hash & 0x3fffffff) - 1), globallyUniqueId: nil, groupingKey: nil, groupInfo: nil, threadId: nil, timestamp: local.date, flags: incoming ? [.Incoming] : [], tags: [], globalTags: [], localTags: [], customTags: [], forwardInfo: nil, author: incoming ? peer : ownPeer, text: "", attributes: [], media: [TelegramMediaAction(action: action)], peers: peers, associatedMessages: SimpleDictionary<MessageId, Message>(), associatedMessageIds: [], associatedMedia: [:], associatedThreadInfo: nil, associatedStories: [:])
+        let purchaseAuthor = local.purchaseBuyerId.flatMap { peers[EnginePeer.Id($0)] }
+        let attributes: [MessageAttribute] = local.purchaseStars.map { [VisualGramGiftPurchaseAttribute(stars: $0)] } ?? []
+        let message = Message(stableId: UInt32.max - 10000 - (hash % 100_000_000), stableVersion: version, id: MessageId(peerId: peerId, namespace: Int32.max - 42, id: -Int32(hash & 0x3fffffff) - 1), globallyUniqueId: nil, groupingKey: nil, groupInfo: nil, threadId: nil, timestamp: local.date, flags: incoming ? [.Incoming] : [], tags: [], globalTags: [], localTags: [], customTags: [], forwardInfo: nil, author: purchaseAuthor ?? (incoming ? peer : ownPeer), text: "", attributes: attributes, media: [TelegramMediaAction(action: action)], peers: peers, associatedMessages: SimpleDictionary<MessageId, Message>(), associatedMessageIds: [], associatedMedia: [:], associatedThreadInfo: nil, associatedStories: [:])
         result.append(.MessageEntry(message, presentationData, true, nil, .none, ChatMessageEntryAttributes()))
     }
     return result
