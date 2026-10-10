@@ -58,11 +58,15 @@ jobs:
           xcrun swiftc -frontend -parse native/*.swift
           xcrun swiftc -frontend -parse telegram-native/submodules/TelegramUI/Components/ChatTitleView/Sources/ChatTitleComponent.swift
           xcrun swiftc -frontend -parse telegram-native/submodules/TelegramUI/Components/Gifts/GiftViewScreen/Sources/GiftViewScreen.swift telegram-native/submodules/TelegramUI/Components/Gifts/GiftViewScreen/Sources/GiftViewBuyGift.swift
+          xcrun swiftc -frontend -parse telegram-native/submodules/TelegramUI/Components/Gifts/GiftOptionsScreen/Sources/GiftOptionsScreen.swift telegram-native/submodules/TelegramUI/Components/Gifts/GiftSetupScreen/Sources/GiftSetupScreen.swift telegram-native/submodules/TelegramUI/Components/Gifts/GiftViewScreen/Sources/GiftPurchaseAlertController.swift
           xcrun swiftc -frontend -parse telegram-native/submodules/TelegramUI/Components/Gifts/GiftStoreScreen/Sources/GiftStoreScreen.swift telegram-native/submodules/TelegramUI/Components/Gifts/GiftStoreScreen/Sources/BalanceComponent.swift
           xcrun swiftc -frontend -parse telegram-native/submodules/TelegramStringFormatting/Sources/ServiceMessageStrings.swift telegram-native/submodules/TelegramUI/Components/Stars/StarsBalanceOverlayComponent/Sources/StarsBalanceOverlayComponent.swift
           python3 scripts/test_native_delivery.py
           python3 scripts/test_native_upgrade.py
           python3 scripts/test_native_trading.py
+          python3 scripts/test_native_gift_flow.py
+          python3 scripts/test_native_stars_history.py
+          xcrun swiftc -frontend -parse telegram-native/submodules/TelegramUI/Sources/TelegramRootController.swift telegram-native/submodules/TabBarUI/Sources/TabBarController.swift telegram-native/submodules/Display/Source/ViewController.swift telegram-native/submodules/TelegramCore/Sources/TelegramEngine/Payments/Stars.swift telegram-native/submodules/TelegramUI/Components/Stars/StarsTransactionsScreen/Sources/StarsTransactionsScreen.swift
           mkdir -p "$RUNNER_TEMP/native-signing/profiles" "$RUNNER_TEMP/native-signing/certs"
           cp "$RUNNER_TEMP/profile.mobileprovision" "$RUNNER_TEMP/native-signing/profiles/Telegram.mobileprovision"
 
