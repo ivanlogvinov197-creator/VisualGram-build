@@ -140,7 +140,7 @@ def apply_trading(root):
                 let context = self.context
                 let _ = (context.account.stateManager.contactBirthdays |> take(1) |> deliverOnMainQueue).start(next: { [weak self, weak controller] birthdays in
                     guard let self, let controller else { return }
-                    let picker = context.sharedContext.makePremiumGiftController(context: context, source: .starGiftTransfer(birthdays, reference, gift, 0, nil, false), completion: { [weak self, weak controller] peerIds in
+                    let picker = context.sharedContext.makePremiumGiftController(context: context, source: .starGiftTransfer(birthdays, reference, gift, VisualGramLocalAppearance.localGiftTransferStars, nil, false), completion: { [weak self, weak controller] peerIds in
                         guard let self, let recipient = peerIds.first else { return .complete() }
                         guard VisualGramLocalAppearance.shared.transferLocalGift(accountId: context.account.peerId, reference: reference, recipientPeerId: recipient, now: Int32(clamping: Int64(Date().timeIntervalSince1970))) else {
                             self.showAttributeInfo(tag: self.statusTag, text: "Подарок больше не принадлежит этому аккаунту.")
@@ -197,6 +197,13 @@ def apply_trading(root):
     market = root / 'submodules/TelegramUI/Components/Gifts/GiftStoreScreen/Sources/GiftStoreScreen.swift'
     replace(market, '                let starsBalance = starsState?.balance ?? .zero\n', '                let appearance = VisualGramLocalAppearance.shared.appearance(accountId: component.context.account.peerId)\n                let starsBalance = (appearance.enabled ? appearance.stars : nil).map { StarsAmount(value: $0, nanos: 0) } ?? starsState?.balance ?? .zero\n')
     options = root / 'submodules/TelegramUI/Components/Gifts/GiftOptionsScreen/Sources/GiftOptionsScreen.swift'
+    # Make the VisualGram amount visible in the ordinary-gift header only.
+    # Payment and purchase flows continue to use the actual StarsContext balance.
+    replace(options, '        let formattedBalance = formatStarsAmountText(self.starsState?.balance ?? StarsAmount.zero, dateTimeFormat: environment.dateTimeFormat)\n', '''        let appearance = VisualGramLocalAppearance.shared.appearance(accountId: component.context.account.peerId)
+        let displayBalance = (appearance.enabled ? appearance.stars : nil).map { StarsAmount(value: $0, nanos: 0) } ?? (self.starsState?.balance ?? StarsAmount.zero)
+        let formattedBalance = formatStarsAmountText(displayBalance, dateTimeFormat: environment.dateTimeFormat)
+''')
+    replace(options, 'let showStarPrice = (self.starsState?.balance.value ?? 0) > 10', 'let showStarPrice = displayBalance.value > 10')
     replace(options, '                                    if let availability = gift.availability, availability.resale > 0 {\n', '                                    if (gift.availability?.resale ?? 0) > 0 || VisualGramLocalAppearance.shared.hasLocalGiftListings(giftId: gift.id) {\n')
     replace(options, 'currentFilter != .transfer && currentVersion', 'currentFilter != .transfer && currentFilter != .resale && currentVersion')
     replace(options, '                self.starsStateDisposable = (component.starsContext.state\n                |> deliverOnMainQueue).start(next: { [weak self] state in\n', '                self.starsStateDisposable = (combineLatest(component.starsContext.state, VisualGramLocalAppearance.shared.changes)\n                |> deliverOnMainQueue).start(next: { [weak self] state, _ in\n')
@@ -220,24 +227,30 @@ func visualGramBuyLocalGift(context: AccountContext, recipientPeerId: EnginePeer
     guard let controller = getController() else { return true }
     let presentationData = context.sharedContext.currentPresentationData.with { $0 }
     let showError: (String) -> Void = { text in
-        getController()?.present(textAlertController(context: context, title: "Локальная покупка", text: text, actions: [TextAlertAction(type: .defaultAction, title: presentationData.strings.Common_OK, action: {})]), in: .window(.root))
+        getController()?.present(textAlertController(context: context, title: nil, text: text, actions: [TextAlertAction(type: .defaultAction, title: presentationData.strings.Common_OK, action: {})]), in: .window(.root))
     }
     guard let price = gift.resellAmounts?.first(where: { $0.currency == .stars })?.amount.value, price > 0 else {
-        showError("Этот подарок не выставлен за локальные звёзды.")
+        showError(presentationData.strings.Gift_Buy_ErrorUnknown)
         return true
     }
-    controller.present(textAlertController(context: context, title: "Купить локально", text: "\(gift.title) #\(gift.number)\nЦена: \(price) ★\nПокупка изменит только локальные подарки и баланс в этом клиенте.", actions: [
-        TextAlertAction(type: .genericAction, title: presentationData.strings.Common_Cancel, action: {}),
-        TextAlertAction(type: .defaultAction, title: "Купить за \(price) ★", action: {
+    let _ = (context.engine.data.get(TelegramEngine.EngineData.Item.Peer.Peer(id: recipientPeerId)) |> take(1) |> deliverOnMainQueue).start(next: { peer in
+        guard let peer else { showError(presentationData.strings.Gift_Buy_ErrorUnknown); return }
+        var dismissImpl: (() -> Void)?
+        let alert = giftPurchaseAlertController(context: context, gift: gift, showAttributes: true, peer: peer, animateBalanceOverlay: true, autoDismissOnCommit: false, navigationController: controller.navigationController as? NavigationController, commit: { currency in
+            guard currency == .stars else { showError(presentationData.strings.Gift_Buy_ErrorUnknown); return }
             switch store.buyLocalGift(accountId: context.account.peerId, recipientPeerId: recipientPeerId, gift: gift, price: price, requireListing: requireListing, now: Int32(clamping: Int64(Date().timeIntervalSince1970))) {
-            case .success: completion()
-            case .insufficientBalance: showError("Недостаточно локальных звёзд.")
-            case .priceChanged: showError("Цена изменилась. Открой подарок снова.")
-            case .unavailable: showError("Подарок уже передан, куплен или принадлежит тебе.")
-            case .invalid: showError("Настрой локальный баланс звёзд в Настройки → VisualGram.")
+            case .success:
+                dismissImpl?()
+                visualGramFinishGift(context: context, peerId: recipientPeerId, controller: controller, completion: completion)
+            case .insufficientBalance: showError("Недостаточно звёзд")
+            case .priceChanged: showError(presentationData.strings.Gift_Buy_ErrorPriceChanged_Title)
+            case .unavailable: showError(presentationData.strings.Gift_Send_ErrorOutOfStock)
+            case .invalid: showError(presentationData.strings.Gift_Buy_ErrorUnknown)
             }
-        })
-    ]), in: .window(.root))
+        }, dismissed: {}, starsOnly: true)
+        dismissImpl = { [weak alert] in alert?.dismiss(animated: true) }
+        controller.present(alert, in: .window(.root))
+    })
     return true
 }
 '''

@@ -28,8 +28,11 @@ public enum EngineMessage {
 public enum StarGiftReference: Equatable { case message(messageId: EngineMessage.Id) }
 public enum StarGift: Codable, Equatable {
     public struct Gift: Codable, Equatable {
-        public struct Availability: Codable, Equatable { let total: Int32 }
+        public struct Availability: Codable, Equatable { var remains: Int32 = 100000; let total: Int32 }
+        public struct PerUserLimit: Codable, Equatable { let total: Int32; let remains: Int32 }
+        public struct Flags: OptionSet, Codable { public var rawValue: Int32; public init(rawValue: Int32) { self.rawValue = rawValue }; static let isAuction = Flags(rawValue: 8); static let requiresPremium = Flags(rawValue: 2) }
         let id: Int64; let title: String?; let availability: Availability?; let releasedBy: EnginePeer.Id?
+        var price: Int64 = 15; var upgradeStars: Int64? = 5; var soldOut: Bool?; var flags: Flags = []; var perUserLimit: PerUserLimit?; var lockedUntilDate: Int32?
     }
     public struct UniqueGift: Codable, Equatable {
         public enum Owner: Codable, Equatable { case peerId(EnginePeer.Id) }
@@ -52,14 +55,17 @@ public enum StarGift: Codable, Equatable {
 }
 public struct StarGiftUpgradePreview { let attributes: [StarGift.UniqueGift.Attribute] }
 public enum ProfileGiftsContext {
-    public enum State {
-        public struct StarGift { let gift: SwiftGift; let reference: StarGiftReference; let owner: EnginePeer.Id }
+    public struct Filters: OptionSet { public let rawValue: Int; public init(rawValue: Int) { self.rawValue = rawValue }; static let displayed = Filters(rawValue: 1); static let hidden = Filters(rawValue: 2); static let unlimited = Filters(rawValue: 4); static let limitedUpgradable = Filters(rawValue: 8); static let limitedNonUpgradable = Filters(rawValue: 16); static let unique = Filters(rawValue: 32) }
+    public enum Sorting { case date, value }
+    public struct State {
+        public struct StarGift { let gift: SwiftGift; let reference: StarGiftReference; let owner: EnginePeer.Id; var date: Int32 = 0; var savedToProfile = true; var pinnedToTop = false }
+        var gifts: [StarGift] = []; var filteredGifts: [StarGift] = []; var count: Int32? = 0; var filter: Filters = [.displayed, .hidden]; var sorting: Sorting = .date
     }
 }
 public typealias SwiftGift = StarGift
 public extension VisualGramGift {
     func profileGift(accountId: EnginePeer.Id, sender: EnginePeer?) -> ProfileGiftsContext.State.StarGift {
-        return .init(gift: self.gift, reference: self.reference(accountId: accountId), owner: accountId)
+        return .init(gift: self.gift, reference: self.reference(accountId: accountId), owner: accountId, date: self.date, savedToProfile: self.savedToProfile ?? true, pinnedToTop: self.pinnedToTop ?? false)
     }
 }
 '''

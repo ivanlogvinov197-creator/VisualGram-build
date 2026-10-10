@@ -66,12 +66,8 @@ def apply(root, project):
             self.forceIsContactPromise.get(),''')
 
     settings = peer / "Sources/PeerInfoSettingsItems.swift"
-    replace(settings, '    let setPhotoTitle: String\n', '''    items[.extra]!.append(PeerInfoScreenDisclosureItem(id: 9001, text: "VisualGram", icon: PresentationResourcesSettings.appearance, action: {
-        interaction.getController()?.push(visualGramAppearanceController(context: context))
-    }))
+    # Appearance controls are opened by three consecutive taps on Chats.
 
-    let setPhotoTitle: String
-''')
     replace(settings, '    if let starsState = data.starsState {\n        if !isPremiumDisabled || abs(starsState.balance.value) > 0 {', '''    if var starsState = data.starsState {
         let appearance = VisualGramLocalAppearance.shared.appearance(accountId: context.account.peerId)
         if appearance.enabled, let balance = appearance.stars {
@@ -258,6 +254,10 @@ private func visualGramGiftHasPremium(context: AccountContext) -> Bool {
     apply_trading(root)
     from apply_native_revision import apply_revision
     apply_revision(root)
+    from apply_native_gift_flow import apply_gift_flow
+    apply_gift_flow(root, project)
+    from apply_native_stars_history import apply_stars_history
+    apply_stars_history(root, project)
 
 
 if __name__ == "__main__":
