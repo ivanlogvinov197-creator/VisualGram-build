@@ -58,7 +58,10 @@ def apply_stars_history(root, project):
 
     private var visualGramServerState: Signal<StarsTransactionsContext.State, NoError> {
         return Signal { subscriber in''', 1)
-    part = part.replace('    init(account: Account, subject: StarsTransactionsContext.Subject, mode: Mode) {\n', '    init(account: Account, subject: StarsTransactionsContext.Subject, mode: Mode) {\n        self.visualGramAccount = account\n        self.visualGramMode = mode\n', 1)
+    initializer = '    init(account: Account, subject: Subject, mode: Mode) {\n'
+    if part.count(initializer) != 1:
+        raise ValueError('Stars transactions initializer changed')
+    part = part.replace(initializer, initializer + '        self.visualGramAccount = account\n        self.visualGramMode = mode\n', 1)
     if 'private var visualGramServerState' not in part:
         raise ValueError('Stars transactions context changed')
     stars.write_text(text[:start] + part + text[end:], encoding='utf-8')
