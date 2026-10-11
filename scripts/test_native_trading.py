@@ -122,7 +122,7 @@ if case let .message(messageId) = receivedBears[0].reference(accountId: b) {
 }
 var sold = bear; sold.soldOut = true
 assert(buyBear(sold) == .unavailable)
-var exhausted = bear; exhausted.availability = .init(remains: 0, total: 100)
+let exhausted = StarGift.Gift(id: bear.id, title: bear.title, availability: .init(remains: 0, total: 100), releasedBy: bear.releasedBy)
 assert(buyBear(exhausted) == .unavailable)
 var locked = bear; locked.lockedUntilDate = 2000
 assert(buyBear(locked) == .unavailable)
