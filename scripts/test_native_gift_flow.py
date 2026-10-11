@@ -13,6 +13,7 @@ def source():
 
 STUBS = r'''
 import Foundation
+import CoreGraphics
 public enum Namespaces { public enum Peer { public static let CloudUser: Int32 = 0 } }
 public enum EnginePeer { public struct Id: Equatable { public let value: Int64; public var namespace: Int32 { 0 }; public init(_ value: Int64) { self.value = value } } }
 public enum ChatLocation { case peer(id: EnginePeer.Id) }
@@ -28,7 +29,7 @@ public enum UIAccessibility { public static var isReduceMotionEnabled = false }
 public final class Queue { public static func mainQueue() -> Queue { Queue() }; public func after(_ delay: Double, _ action: () -> Void) { action() } }
 public class ViewController {
     public var view = View()
-    public weak var navigationController: NavigationController?
+    public weak var navigationController: ViewController?
     public var presentingViewController: ViewController?
 }
 public protocol ChatController: ViewController { var chatLocation: ChatLocation { get }; func hintPlayNextOutgoingGift() }
