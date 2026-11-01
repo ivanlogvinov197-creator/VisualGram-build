@@ -42,13 +42,13 @@ def apply_stars_history(root, project):
         |> mapToSignal { state, _ -> Signal<StarsTransactionsContext.State, NoError> in
             let account = self.visualGramAccount
             let appearance = VisualGramLocalAppearance.shared.appearance(accountId: account.peerId)
-            guard !self.ton, self.peerId == account.peerId, appearance.enabled, appearance.stars != nil else { return .single(state) }
+            guard self.peerId == account.peerId, appearance.enabled, (self.ton ? appearance.grams : appearance.stars) != nil else { return .single(state) }
             return account.postbox.transaction { transaction in
-                let ids = Set((appearance.starsHistory ?? []).compactMap { $0.peerId } + [account.peerId.toInt64()])
+                let ids = Set(((self.ton ? appearance.gramHistory : appearance.starsHistory) ?? []).compactMap { $0.peerId } + [account.peerId.toInt64()])
                 var peers: [Int64: EnginePeer] = [:]
                 for id in ids { if let peer = transaction.getPeer(EnginePeer.Id(id)) { peers[id] = EnginePeer(peer) } }
                 var result = state
-                result.transactions = VisualGramLocalAppearance.shared.starsHistoryTransactions(accountId: account.peerId, mode: self.visualGramMode, peers: peers)
+                result.transactions = VisualGramLocalAppearance.shared.starsHistoryTransactions(accountId: account.peerId, mode: self.visualGramMode, peers: peers, ton: self.ton)
                 result.canLoadMore = false
                 result.isLoading = false
                 return result
@@ -68,8 +68,8 @@ def apply_stars_history(root, project):
     screen = root / 'submodules/TelegramUI/Components/Stars/StarsTransactionsScreen/Sources/StarsTransactionsScreen.swift'
     replace(screen, '                self.stateDisposable = (component.starsContext.state\n', '                self.stateDisposable = (combineLatest(component.starsContext.state, VisualGramLocalAppearance.shared.changes) |> map { state, _ in state }\n')
     replace(screen, '            let initialTransactions = self.starsState?.transactions ?? []\n', '''            let localWallet = VisualGramLocalAppearance.shared.appearance(accountId: component.context.account.peerId)
-            let showLocalHistory = localWallet.enabled && localWallet.stars != nil && !component.starsContext.ton && component.starsContext.peerId == component.context.account.peerId
-            let hasTransactions = showLocalHistory ? !(localWallet.starsHistory ?? []).isEmpty : !(self.starsState?.transactions ?? []).isEmpty
+            let showLocalHistory = localWallet.enabled && (component.starsContext.ton ? localWallet.grams : localWallet.stars) != nil && component.starsContext.peerId == component.context.account.peerId
+            let hasTransactions = showLocalHistory ? !((component.starsContext.ton ? localWallet.gramHistory : localWallet.starsHistory) ?? []).isEmpty : !(self.starsState?.transactions ?? []).isEmpty
 ''')
     replace(screen, '            if !initialTransactions.isEmpty {\n', '            if hasTransactions {\n')
 

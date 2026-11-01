@@ -26,6 +26,9 @@ public typealias VisualGramUsername = Int
 public typealias PeerVerification = Int
 public typealias PeerEmojiStatus = Int
 public typealias TelegramStarRating = Int
+public typealias VisualGramNameColor = Int
+public typealias TelegramBusinessHours = Int
+public typealias TelegramBusinessLocation = Int
 public typealias VisualGramGiftCollection = Int
 '''
 

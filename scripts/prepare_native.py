@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 import re
 
-UPSTREAM_REVISION = "6ad963e5b62d354da79040f388ae2b9132fb17b8"
+UPSTREAM_REVISION = "279f89e4d4f63f17227bf877dc3d8990f22ecd58"
 
 
 def replace(path, old, new, expected=1):
@@ -23,15 +23,13 @@ def prepare(root):
     # Use the private app sandbox. Never borrow another app's provisioned group.
     replace(root / "Telegram/BUILD",
             '<string>group.{telegram_bundle_id}</string>',
-            '', expected=1)
+            '', expected=2)
     delegate = root / "submodules/TelegramUI/Sources/AppDelegate.swift"
     replace(delegate, 'configuration.sharedContainerIdentifier = appGroupName',
             'configuration.sharedContainerIdentifier = nil')
     replace(delegate,
             '        let baseAppBundleId = Bundle.main.bundleIdentifier!\n        let appGroupName = "group.\\(baseAppBundleId)"\n\n        let configuration = URLSessionConfiguration.background',
             '        let configuration = URLSessionConfiguration.background')
-    replace(delegate, '        let appGroupName = "group.\\(baseAppBundleId)"\n',
-            '', expected=1)
     replace(delegate,
             'let maybeAppGroupUrl = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupName)',
             'let maybeAppGroupUrl = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first')

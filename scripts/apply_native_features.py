@@ -19,23 +19,23 @@ def apply(root, project):
     shutil.copyfile(project / "native/VisualGramGiftDelivery.swift", root / "submodules/TelegramUI/Sources/VisualGramGiftDelivery.swift")
     account_context = root / "submodules/TelegramUI/Sources/AccountContext.swift"
     replace(account_context, '    private var experimentalUISettingsDisposable: Disposable?\n', '    private var experimentalUISettingsDisposable: Disposable?\n    private var visualGramGiftDelivery: VisualGramGiftDelivery?\n')
-    replace(account_context, '            (self.animationRenderer as? DCTMultiAnimationRendererImpl)?.useYuvA = settings.compressedEmojiCache\n        })\n    }', '            (self.animationRenderer as? DCTMultiAnimationRendererImpl)?.useYuvA = settings.compressedEmojiCache\n        })\n        if !temp { self.visualGramGiftDelivery = VisualGramGiftDelivery(context: self) }\n    }')
+    replace(account_context, '        }\n    }\n\n    deinit {\n        if self.walletContext != nil {', '        }\n        if !temp { self.visualGramGiftDelivery = VisualGramGiftDelivery(context: self) }\n    }\n\n    deinit {\n        if self.walletContext != nil {')
     replace(account_context, '        self.experimentalUISettingsDisposable?.dispose()\n', '        self.experimentalUISettingsDisposable?.dispose()\n        self.visualGramGiftDelivery?.stop()\n')
     replace(peer / "BUILD", '    deps = [\n', '    deps = [\n        "//submodules/TelegramUI/Components/Gifts/GiftOptionsScreen",\n')
 
     data = peer / "Sources/PeerInfoData.swift"
     replace(data, '    let peer: EnginePeer?\n    let chatPeer:', '    let serverPeer: EnginePeer?\n    var peer: EnginePeer?\n    let chatPeer:')
-    replace(data, '    let cachedData: CachedPeerData?\n    let status:', '    let serverCachedData: CachedPeerData?\n    var cachedData: CachedPeerData?\n    let status:')
+    replace(data, '    let cachedData: EngineCachedPeerData?\n    let firstWelcomeMessageText:', '    let serverCachedData: EngineCachedPeerData?\n    var cachedData: EngineCachedPeerData?\n    let firstWelcomeMessageText:')
     replace(data, '    let availablePanes: [PeerInfoPaneKey]\n', '    let serverAvailablePanes: [PeerInfoPaneKey]\n    var availablePanes: [PeerInfoPaneKey]\n')
     replace(data, '        self.peer = peer\n        self.chatPeer', '        self.serverPeer = peer\n        self.peer = peer\n        self.chatPeer')
-    replace(data, '        self.cachedData = cachedData\n        self.status', '        self.serverCachedData = cachedData\n        self.cachedData = cachedData\n        self.status')
+    replace(data, '        self.cachedData = cachedData\n        self.firstWelcomeMessageText', '        self.serverCachedData = cachedData\n        self.cachedData = cachedData\n        self.firstWelcomeMessageText')
     replace(data, '        self.availablePanes = availablePanes\n', '        self.serverAvailablePanes = availablePanes\n        self.availablePanes = availablePanes\n')
     source = data.read_text(encoding="utf-8")
     signature = '    init(\n        peer: EnginePeer?,\n'
     start = source.index(signature)
     end = source.index('    ) {', start)
     parameters = re.findall(r'^        (\w+):', source[start:end], re.MULTILINE)
-    if len(parameters) != 45:
+    if len(parameters) != 48:
         raise ValueError("PeerInfoScreenData constructor changed")
     original = {"peer": "serverPeer", "cachedData": "serverCachedData", "availablePanes": "serverAvailablePanes"}
     arguments = ',\n'.join(f'            {name}: self.{original.get(name, name)}' for name in parameters)
@@ -258,6 +258,8 @@ private func visualGramGiftHasPremium(context: AccountContext) -> Bool {
     apply_gift_flow(root, project)
     from apply_native_stars_history import apply_stars_history
     apply_stars_history(root, project)
+    from apply_native_november import apply_november
+    apply_november(root, project)
 
 
 if __name__ == "__main__":

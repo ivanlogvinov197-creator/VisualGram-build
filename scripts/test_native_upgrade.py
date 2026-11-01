@@ -15,6 +15,8 @@ def source():
 
 STUBS = r'''
 import Foundation
+public struct StarsAmount: Codable, Equatable { let value: Int64; let nanos: Int32 }
+public struct CurrencyAmount: Codable, Equatable { public enum Currency: Codable { case stars, ton }; let amount: StarsAmount; let currency: Currency }
 public enum EnginePeer {
     public struct Id: Codable, Hashable {
         let value: Int64
@@ -25,7 +27,7 @@ public enum EnginePeer {
 public enum EngineMessage {
     public struct Id: Hashable { let peerId: EnginePeer.Id; let namespace: Int32; let id: Int32 }
 }
-public enum StarGiftReference: Equatable { case message(messageId: EngineMessage.Id) }
+public enum StarGiftReference: Equatable, Hashable { case message(messageId: EngineMessage.Id) }
 public enum StarGift: Codable, Equatable {
     public struct Gift: Codable, Equatable {
         public struct Availability: Codable, Equatable { var remains: Int32 = 100000; let total: Int32 }
@@ -39,16 +41,18 @@ public enum StarGift: Codable, Equatable {
         public struct Availability: Codable, Equatable { let issued: Int32; let total: Int32 }
         public enum Attribute: Codable, Equatable {
             public enum AttributeType { case model, pattern, backdrop }
-            case model(Int), pattern(Int), backdrop(Int)
+            case model(String, Int, Int32, Bool), pattern(Int), backdrop(Int)
+            static func model(_ id: Int) -> Self { .model("Model", id, 1, false) }
             var attributeType: AttributeType {
                 switch self { case .model: return .model; case .pattern: return .pattern; case .backdrop: return .backdrop }
             }
         }
         let id: Int64; let giftId: Int64; let title: String; let number: Int32; let slug: String
         let owner: Owner?; let attributes: [Attribute]; let availability: Availability
-        let giftAddress: String?; let resellAmounts: [Int]?; let resellForTonOnly: Bool
+        let giftAddress: String?; let resellAmounts: [CurrencyAmount]?; let resellForTonOnly: Bool
         let releasedBy: EnginePeer.Id?; let valueAmount: Int64?; let valueCurrency: String?; let valueUsdAmount: Int64?
-        let flags: [Int]; let themePeerId: EnginePeer.Id?; let peerColor: Int?; let hostPeerId: EnginePeer.Id?
+        public struct Flags: OptionSet, Codable { public let rawValue: Int32; public init(rawValue: Int32) { self.rawValue = rawValue }; public static let isBurned = Flags(rawValue: 2) }
+        let flags: Flags; let themePeerId: EnginePeer.Id?; let peerColor: Int?; let hostPeerId: EnginePeer.Id?
         let minOfferStars: Int64?; let craftChancePermille: Int32?
     }
     case generic(Gift), unique(UniqueGift)

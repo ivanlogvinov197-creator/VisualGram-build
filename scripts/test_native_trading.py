@@ -28,6 +28,7 @@ public struct VisualGramAppearance: Codable {
     var enabled = false
     var premium = false
     var gifts: [VisualGramGift] = []
+    var giftOrder: [String]?
     var stars: Int64?
     var giftPurchaseCounts: [String: Int32]?
     var starsHistory: [VisualGramGift.StarsTransaction]?

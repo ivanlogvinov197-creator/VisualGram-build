@@ -22,7 +22,7 @@ public struct EnginePeer: Equatable {
 }
 public enum StarGift: Codable, Equatable { case generic(Int64), unique(Int64) }
 public struct StarsAmount { public let value: Int64; public let nanos: Int32 }
-public struct CurrencyAmount { public enum Currency { case stars }; public let amount: StarsAmount; public let currency: Currency }
+public struct CurrencyAmount { public enum Currency { case stars, ton }; public let amount: StarsAmount; public let currency: Currency }
 public enum StarsTransactionsContext { public enum Mode { case all, incoming, outgoing } }
 public enum StarsContext { public enum State {
     public struct Transaction {
@@ -34,7 +34,7 @@ public enum StarsContext { public enum State {
         }
     }
 } }
-public struct VisualGramAppearance { public var starsHistory: [VisualGramGift.StarsTransaction]? }
+public struct VisualGramAppearance { public var starsHistory: [VisualGramGift.StarsTransaction]?; public var gramHistory: [VisualGramGift.StarsTransaction]? }
 public final class VisualGramLocalAppearance {
     public var values: [Int64: VisualGramAppearance] = [:]
     public func appearance(accountId: EnginePeer.Id) -> VisualGramAppearance { values[accountId.toInt64()] ?? .init() }

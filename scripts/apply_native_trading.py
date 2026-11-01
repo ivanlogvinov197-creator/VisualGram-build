@@ -207,12 +207,12 @@ def apply_trading(root):
     replace(options, '                                    if let availability = gift.availability, availability.resale > 0 {\n', '                                    if (gift.availability?.resale ?? 0) > 0 || VisualGramLocalAppearance.shared.hasLocalGiftListings(giftId: gift.id) {\n')
     replace(options, 'currentFilter != .transfer && currentVersion', 'currentFilter != .transfer && currentFilter != .resale && currentVersion')
     replace(options, '                self.starsStateDisposable = (component.starsContext.state\n                |> deliverOnMainQueue).start(next: { [weak self] state in\n', '                self.starsStateDisposable = (combineLatest(component.starsContext.state, VisualGramLocalAppearance.shared.changes)\n                |> deliverOnMainQueue).start(next: { [weak self] state, _ in\n')
-    replace(options, '                if case let .generic(gift) = gift {\n                    if let lockedUntilDate', '''                if case let .generic(gift) = gift {
+    replace(options, '                if case let .generic(gift) = gift {\n                    if !skipDateCheck, let lockedUntilDate', '''                if case let .generic(gift) = gift {
                     if self.starsFilter == .resale, VisualGramLocalAppearance.shared.hasLocalGiftListings(giftId: gift.id) {
                         mainController.push(component.context.sharedContext.makeGiftStoreController(context: component.context, peerId: component.peerId, gift: gift))
                         return
                     }
-                    if let lockedUntilDate''')
+                    if !skipDateCheck, let lockedUntilDate''')
 
 
 BUY_HELPER = r'''
@@ -223,13 +223,15 @@ func visualGramBuyLocalGift(context: AccountContext, recipientPeerId: EnginePeer
     let store = VisualGramLocalAppearance.shared
     let appearance = store.appearance(accountId: context.account.peerId)
     let requireListing = store.localReference(slug: gift.slug) != nil
-    guard requireListing || (appearance.enabled && appearance.stars != nil) else { return false }
+    guard requireListing || (appearance.enabled && (appearance.stars != nil || appearance.grams != nil)) else { return false }
     guard let controller = getController() else { return true }
     let presentationData = context.sharedContext.currentPresentationData.with { $0 }
     let showError: (String) -> Void = { text in
         getController()?.present(textAlertController(context: context, title: nil, text: text, actions: [TextAlertAction(type: .defaultAction, title: presentationData.strings.Common_OK, action: {})]), in: .window(.root))
     }
-    guard let price = gift.resellAmounts?.first(where: { $0.currency == .stars })?.amount.value, price > 0 else {
+    let purchaseGift = gift
+    let gift = store.giftForLocalPurchase(accountId: context.account.peerId, gift: gift)
+    guard gift.resellAmounts?.contains(where: { $0.amount.value > 0 }) == true else {
         showError(presentationData.strings.Gift_Buy_ErrorUnknown)
         return true
     }
@@ -237,20 +239,27 @@ func visualGramBuyLocalGift(context: AccountContext, recipientPeerId: EnginePeer
         guard let peer else { showError(presentationData.strings.Gift_Buy_ErrorUnknown); return }
         var dismissImpl: (() -> Void)?
         let alert = giftPurchaseAlertController(context: context, gift: gift, showAttributes: true, peer: peer, animateBalanceOverlay: true, autoDismissOnCommit: false, navigationController: controller.navigationController as? NavigationController, commit: { currency in
-            guard currency == .stars else { showError(presentationData.strings.Gift_Buy_ErrorUnknown); return }
-            switch store.buyLocalGift(accountId: context.account.peerId, recipientPeerId: recipientPeerId, gift: gift, price: price, requireListing: requireListing, now: Int32(clamping: Int64(Date().timeIntervalSince1970))) {
+            let result: VisualGramGiftPurchaseResult
+            let now = Int32(clamping: Int64(Date().timeIntervalSince1970))
+            if currency == .ton, let price = store.localGramPrice(accountId: context.account.peerId, gift: purchaseGift) {
+                result = store.buyLocalGiftWithGrams(accountId: context.account.peerId, recipientPeerId: recipientPeerId, gift: purchaseGift, price: price, requireListing: requireListing, now: now)
+            } else if currency == .stars, let price = gift.resellAmounts?.first(where: { $0.currency == .stars })?.amount.value {
+                result = store.buyLocalGift(accountId: context.account.peerId, recipientPeerId: recipientPeerId, gift: gift, price: price, requireListing: requireListing, now: now)
+            } else { showError(presentationData.strings.Gift_Buy_ErrorUnknown); return }
+            switch result {
             case .success:
                 dismissImpl?()
                 visualGramFinishGift(context: context, peerId: recipientPeerId, controller: controller, completion: completion)
-            case .insufficientBalance: showError("Недостаточно звёзд")
+            case .insufficientBalance: showError(currency == .ton ? "Недостаточно GRAM" : "Недостаточно звёзд")
             case .priceChanged: showError(presentationData.strings.Gift_Buy_ErrorPriceChanged_Title)
             case .unavailable: showError(presentationData.strings.Gift_Send_ErrorOutOfStock)
             case .invalid: showError(presentationData.strings.Gift_Buy_ErrorUnknown)
             }
-        }, dismissed: {}, starsOnly: true)
+        }, dismissed: {}, starsOnly: appearance.grams == nil)
         dismissImpl = { [weak alert] in alert?.dismiss(animated: true) }
         controller.present(alert, in: .window(.root))
     })
     return true
 }
 '''
+

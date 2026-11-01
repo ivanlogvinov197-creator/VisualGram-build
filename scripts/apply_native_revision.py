@@ -34,6 +34,7 @@ def apply_revision(root):
                                 titleStatusIcon = .emojiStatus(status)
                             } else { titleStatusIcon = .none }
                         }
+                        if titleStatusIcon != .none, titleCredibilityIcon == .premium { titleCredibilityIcon = .none }
                         if let verification = local.verification {
                             titleVerifiedIcon = .emojiStatus(PeerEmojiStatus(content: .emoji(fileId: verification.iconFileId), expirationDate: nil))
                         }
@@ -74,9 +75,9 @@ def apply_revision(root):
     # copy or by incoming=true in a native preview. Commit still checks ownership.
     replace(gift, '        fileprivate var visualGramCanManage: Bool {\n', '''        fileprivate var visualGramCatalogPurchase: Bool {
             guard case let .uniqueGift(gift, _) = self.subject,
-                  gift.resellAmounts?.contains(where: { $0.currency == .stars && $0.amount.value > 0 }) == true else { return false }
+                  gift.resellAmounts?.contains(where: { $0.amount.value > 0 }) == true else { return false }
             let appearance = VisualGramLocalAppearance.shared.appearance(accountId: self.context.account.peerId)
-            guard (appearance.enabled && appearance.stars != nil) || self.visualGramReference != nil else { return false }
+            guard (appearance.enabled && (appearance.stars != nil || appearance.grams != nil)) || self.visualGramReference != nil else { return false }
             if case let .peerId(owner) = gift.owner, owner == self.context.account.peerId { return false }
             return true
         }

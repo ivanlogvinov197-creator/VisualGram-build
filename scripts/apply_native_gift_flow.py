@@ -12,7 +12,7 @@ def apply_gift_flow(root, project):
     shutil.copyfile(project / 'native/VisualGramGiftPurchaseAttribute.swift', root / 'submodules/TelegramCore/Sources/VisualGramGiftPurchaseAttribute.swift')
     service = root / 'submodules/TelegramStringFormatting/Sources/ServiceMessageStrings.swift'
     replace(service, '                    if isAuctionAcquired {\n', '''                    if message.id.namespace == Int32.max - 42, let purchase = message._asMessage().attributes.compactMap({ $0 as? VisualGramGiftPurchaseAttribute }).first {
-                        let starsString = strings.Notification_StarsGift_Bought_Stars(Int32(clamping: purchase.stars))
+                        let starsString = purchase.grams.map { VisualGramLocalAppearance.formatGrams($0) + " GRAM" } ?? strings.Notification_StarsGift_Bought_Stars(Int32(clamping: purchase.stars))
                         if message.author?.id == accountPeerId || !message._asMessage().flags.contains(.Incoming) {
                             if message.id.peerId == accountPeerId {
                                 attributedString = addAttributesToStringWithRanges(strings.Notification_StarsGift_BoughtForYouself(starsString)._tuple, body: bodyAttributes, argumentAttributes: [0: boldAttributes])
@@ -107,7 +107,7 @@ def apply_gift_flow(root, project):
     replace(setup, 'import Foundation\n', 'import Foundation\nimport GiftViewScreen\n')
     build = root / gift_path / 'GiftSetupScreen/BUILD'
     replace(build, '    deps = [\n', '    deps = [\n        "//submodules/TelegramUI/Components/Gifts/GiftViewScreen",\n')
-    replace(setup, '            guard let component = self.component, let environment = self.environment, let starsContext = component.context.starsContext, let starsState = starsContext.currentState else {\n', '''            guard let component = self.component, let environment = self.environment else { return }
+    replace(setup, '            guard !self.inProgress, let component = self.component, let environment = self.environment, let starsContext = component.context.starsContext, let starsState = starsContext.currentState else {\n', '''            guard !self.inProgress, let component = self.component, let environment = self.environment else { return }
             if case let .starGift(gift, _) = component.subject {
                 let appearance = VisualGramLocalAppearance.shared.appearance(accountId: component.context.account.peerId)
                 if appearance.enabled, appearance.stars != nil {
@@ -148,3 +148,4 @@ ORDINARY_BUY = r'''
             } else { commit(nil) }
         }
 '''
+
