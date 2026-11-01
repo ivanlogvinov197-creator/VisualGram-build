@@ -42,6 +42,16 @@ public struct VisualGramGift: Codable, Equatable {
         public var title: String?
         public var peerId: Int64?
         public var gift: StarGift?
+
+        public init(id: String, date: Int32, amount: Int64, kind: Kind, title: String?, peerId: Int64?, gift: StarGift?) {
+            self.id = id
+            self.date = date
+            self.amount = amount
+            self.kind = kind
+            self.title = title
+            self.peerId = peerId
+            self.gift = gift
+        }
     }
     public enum Direction: String, Codable { case received, sent }
     public var gift: StarGift
@@ -167,9 +177,9 @@ public final class VisualGramLocalAppearance {
 
     private init() {
         self.defaults = UserDefaults.standard
-        if let data = self.defaults.data(forKey: "visualgram.appearance.v3"), let decoded = try? JSONDecoder().decode([String: VisualGramAppearance].self, from: data) {
+        if let data = self.defaults.data(forKey: "visualgram.appearance.v3"), let decoded = Self.decodeStoredAppearances(data) {
             self.values = decoded
-        } else if let data = self.defaults.data(forKey: "visualgram.appearance.v2"), let decoded = try? JSONDecoder().decode([String: VisualGramAppearance].self, from: data) {
+        } else if let data = self.defaults.data(forKey: "visualgram.appearance.v2"), let decoded = Self.decodeStoredAppearances(data) {
             self.values = Self.migrateLegacyAppearances(decoded)
             if let migrated = try? JSONEncoder().encode(self.values) { self.defaults.set(migrated, forKey: "visualgram.appearance.v3") }
         } else {
@@ -202,6 +212,29 @@ public final class VisualGramLocalAppearance {
             }
         }
         return result
+    }
+
+    static func decodeStoredAppearances(_ data: Data) -> [String: VisualGramAppearance]? {
+        if let decoded = try? JSONDecoder().decode([String: VisualGramAppearance].self, from: data) { return decoded }
+        // Telegram 13.1 added required description entities to saved verifications.
+        // Preserve the rest of an older profile when that field is absent.
+        func normalize(_ profile: [String: Any]) -> [String: Any] {
+            var profile = profile
+            for key in ["verification", "majorTemplate"] {
+                if var verification = profile[key] as? [String: Any], verification["descriptionEntities"] == nil {
+                    verification["descriptionEntities"] = [Any]()
+                    profile[key] = verification
+                }
+            }
+            if let overrides = profile["peerOverrides"] as? [String: [String: Any]] {
+                profile["peerOverrides"] = overrides.mapValues(normalize)
+            }
+            return profile
+        }
+        guard let object = try? JSONSerialization.jsonObject(with: data),
+              let profiles = object as? [String: [String: Any]],
+              let normalized = try? JSONSerialization.data(withJSONObject: profiles.mapValues(normalize)) else { return nil }
+        return try? JSONDecoder().decode([String: VisualGramAppearance].self, from: normalized)
     }
 
     public var changes: Signal<Int32, NoError> {

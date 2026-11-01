@@ -52,7 +52,7 @@ final class VisualGramGiftGridController: ViewController, UICollectionViewDataSo
     private var items: [VisualGramGift] = []
     private var selected = Set<String>()
     private let grid: UICollectionView
-    private let toolbar = UIStackView()
+    private let giftActionsBar = UIStackView()
     private let help = UILabel()
     private var disposable: Disposable?
 
@@ -79,13 +79,13 @@ final class VisualGramGiftGridController: ViewController, UICollectionViewDataSo
         self.help.font = .systemFont(ofSize: 13); self.help.textColor = data.theme.list.itemSecondaryTextColor; self.help.numberOfLines = 2
         self.help.text = self.cardMode ? "Выбери до 10 NFT для карточки. Один из них можно сделать фоном." : "Выбери подарки для действий. Удерживай и перетаскивай, чтобы изменить порядок."
         self.view.addSubview(self.help)
-        self.toolbar.axis = .horizontal; self.toolbar.distribution = .fillEqually; self.toolbar.spacing = 8
+        self.giftActionsBar.axis = .horizontal; self.giftActionsBar.distribution = .fillEqually; self.giftActionsBar.spacing = 8
         for (index, title) in (self.cardMode ? ["На карточку", "Фон", "Убрать"] : ["Показать", "Скрыть", "Закрепить", "Удалить"]).enumerated() {
             let button = UIButton(type: .system); button.setTitle(title, for: .normal); button.tag = index
             button.addTarget(self, action: #selector(self.performAction(_:)), for: .touchUpInside)
-            self.toolbar.addArrangedSubview(button)
+            self.giftActionsBar.addArrangedSubview(button)
         }
-        self.view.addSubview(self.toolbar)
+        self.view.addSubview(self.giftActionsBar)
         self.disposable = (VisualGramLocalAppearance.shared.changes |> deliverOnMainQueue).start(next: { [weak self] _ in self?.refresh() })
     }
 
@@ -108,8 +108,8 @@ final class VisualGramGiftGridController: ViewController, UICollectionViewDataSo
         let width = max(0, layout.size.width - left - layout.safeInsets.right - 12)
         let bottom = max(layout.safeInsets.bottom, layout.intrinsicInsets.bottom)
         self.help.frame = CGRect(x: left + 4, y: top, width: max(0, width - 8), height: 44)
-        self.toolbar.frame = CGRect(x: left, y: layout.size.height - bottom - 60, width: width, height: 48)
-        self.grid.frame = CGRect(x: left, y: top + 52, width: width, height: max(0, self.toolbar.frame.minY - top - 60))
+        self.giftActionsBar.frame = CGRect(x: left, y: layout.size.height - bottom - 60, width: width, height: 48)
+        self.grid.frame = CGRect(x: left, y: top + 52, width: width, height: max(0, self.giftActionsBar.frame.minY - top - 60))
         self.grid.collectionViewLayout.invalidateLayout()
     }
 

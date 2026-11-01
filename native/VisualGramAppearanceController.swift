@@ -299,7 +299,7 @@ private final class VisualGramAppearanceActions {
                     guard let self else { return }
                     let template: PeerVerification
                     if let verification = (cached as? CachedUserData)?.verification { template = verification }
-                    else if let settings = (cached as? CachedUserData)?.botInfo?.verifierSettings { template = PeerVerification(botId: peer.id, iconFileId: settings.iconFileId, description: settings.customDescription ?? settings.companyName) }
+                    else if let settings = (cached as? CachedUserData)?.botInfo?.verifierSettings { template = PeerVerification(botId: peer.id, iconFileId: settings.iconFileId, description: settings.customDescription ?? settings.companyName, descriptionEntities: settings.customDescriptionEntities ?? []) }
                     else { self.message("На этом профиле нет значка. Укажи @юзернейм человека с верификацией Major или её официального бота. После первого выбора значок включается одним переключателем."); return }
                     VisualGramLocalAppearance.shared.update(accountId: self.context.account.peerId) { $0.majorTemplate = template }
                     self.update { $0.enabled = true; $0.verification = template }
