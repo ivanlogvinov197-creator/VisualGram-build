@@ -73,6 +73,10 @@ jobs:
           mkdir -p "$RUNNER_TEMP/native-signing/profiles" "$RUNNER_TEMP/native-signing/certs"
           cp "$RUNNER_TEMP/profile.mobileprovision" "$RUNNER_TEMP/native-signing/profiles/Telegram.mobileprovision"
 
+      - name: Analyze full native dependency graph
+        if: inputs.validation_only == true
+        run: python3 scripts/validate_native_graph.py telegram-native
+
       - name: Compile native Telegram arm64
         if: inputs.validation_only != true
         working-directory: telegram-native
