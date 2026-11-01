@@ -8,7 +8,40 @@ def apply_gift_flow(root, project):
     with protocol.open('a', encoding='utf-8') as handle:
         handle.write('\npublic protocol VisualGramGiftFlowController: AnyObject {\n    var visualGramGiftCompletion: (() -> Void)? { get set }\n}\n')
     gift_path = 'submodules/TelegramUI/Components/Gifts/'
-    shutil.copyfile(project / 'native/VisualGramGiftFlow.swift', root / gift_path / 'GiftViewScreen/Sources/VisualGramGiftFlow.swift')
+    # Completion is shared by setup, previews and the app shell. In Telegram
+    # 13.1.2 GiftViewScreen depends on GiftSetupScreen, so neither may own it.
+    flow = root / gift_path / 'VisualGramGiftFlow'
+    (flow / 'Sources').mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(project / 'native/VisualGramGiftFlow.swift', flow / 'Sources/VisualGramGiftFlow.swift')
+    (flow / 'BUILD').write_text('''load("@build_bazel_rules_swift//swift:swift.bzl", "swift_library")
+swift_library(
+    name = "VisualGramGiftFlow",
+    module_name = "VisualGramGiftFlow",
+    srcs = glob(["Sources/**/*.swift"]),
+    copts = ["-warnings-as-errors"],
+    deps = [
+        "//submodules/Display",
+        "//submodules/AccountContext",
+        "//submodules/TelegramCore",
+        "//submodules/SSignalKit/SwiftSignalKit",
+        "//submodules/ConfettiEffect",
+    ],
+    visibility = ["//visibility:public"],
+)
+''', encoding='utf-8')
+    for module, source in [
+        ('GiftOptionsScreen', 'GiftOptionsScreen.swift'),
+        ('GiftSetupScreen', 'GiftSetupScreen.swift'),
+        ('GiftViewScreen', 'GiftViewBuyGift.swift'),
+        ('GiftViewScreen', 'GiftViewScreen.swift'),
+    ]:
+        path = root / gift_path / module
+        replace(path / 'Sources' / source, 'import Foundation\n', 'import Foundation\nimport VisualGramGiftFlow\n')
+        build = path / 'BUILD'
+        if '"//submodules/TelegramUI/Components/Gifts/VisualGramGiftFlow"' not in build.read_text(encoding='utf-8'):
+            replace(build, '    deps = [\n', '    deps = [\n        "//submodules/TelegramUI/Components/Gifts/VisualGramGiftFlow",\n')
+    replace(root / 'submodules/TelegramUI/Sources/SharedAccountContext.swift', 'import Foundation\n', 'import Foundation\nimport VisualGramGiftFlow\n')
+    replace(root / 'submodules/TelegramUI/BUILD', '    deps = [\n', '    deps = [\n        "//submodules/TelegramUI/Components/Gifts/VisualGramGiftFlow",\n')
     shutil.copyfile(project / 'native/VisualGramGiftPurchaseAttribute.swift', root / 'submodules/TelegramCore/Sources/VisualGramGiftPurchaseAttribute.swift')
     service = root / 'submodules/TelegramStringFormatting/Sources/ServiceMessageStrings.swift'
     replace(service, '                    if isAuctionAcquired {\n', '''                    if message.id.namespace == Int32.max - 42, let purchase = message._asMessage().attributes.compactMap({ $0 as? VisualGramGiftPurchaseAttribute }).first {
@@ -74,7 +107,7 @@ def apply_gift_flow(root, project):
 ''' + text[end:]
     # Class declaration has upstream protocols; append ours without replacing them.
     declaration = next(line for line in text.splitlines() if line.startswith('public class GiftViewScreen:'))
-    text = text.replace(declaration, declaration[:-1].rstrip() + ', VisualGramGiftFlowController {\n    public var visualGramGiftCompletion: (() -> Void)?\n    public var visualGramPreview = false')
+    text = text.replace(declaration, declaration[:-1].rstrip() + ', VisualGramGiftFlowController, VisualGramGiftPreviewController {\n    public var visualGramGiftCompletion: (() -> Void)?\n    public func visualGramDismissGiftPreview() { self.dismissAnimated() }\n    public var visualGramPreview = false')
     text = text.replace('controller.customAction?.title.hasSuffix("локально") == true', 'controller.visualGramPreview')
     screen.write_text(text, encoding='utf-8')
 
@@ -104,9 +137,6 @@ def apply_gift_flow(root, project):
     replace(bubble, '            if !alreadySeen && self.animationNode.isPlaying {\n', '            if !alreadySeen && self.animationNode.isPlaying && item.message.id.namespace != Int32.max - 42 {\n')
 
     setup = root / gift_path / 'GiftSetupScreen/Sources/GiftSetupScreen.swift'
-    replace(setup, 'import Foundation\n', 'import Foundation\nimport GiftViewScreen\n')
-    build = root / gift_path / 'GiftSetupScreen/BUILD'
-    replace(build, '    deps = [\n', '    deps = [\n        "//submodules/TelegramUI/Components/Gifts/GiftViewScreen",\n')
     replace(setup, '            guard !self.inProgress, let component = self.component, let environment = self.environment, let starsContext = component.context.starsContext, let starsState = starsContext.currentState else {\n', '''            guard !self.inProgress, let component = self.component, let environment = self.environment else { return }
             if case let .starGift(gift, _) = component.subject {
                 let appearance = VisualGramLocalAppearance.shared.appearance(accountId: component.context.account.peerId)

@@ -38,10 +38,11 @@ public protocol GiftSetupScreenProtocol {}
 public protocol ContactSelectionController {}
 public protocol PeerInfoScreen {}
 public protocol VisualGramGiftFlowController: AnyObject { var visualGramGiftCompletion: (() -> Void)? { get set } }
-public final class GiftViewScreen: ViewController, VisualGramGiftFlowController {
+public final class GiftViewScreen: ViewController, VisualGramGiftFlowController, VisualGramGiftPreviewController {
     public var visualGramGiftCompletion: (() -> Void)?
     public var dismissCount = 0
     public func dismissAnimated() { dismissCount += 1; presentingViewController = nil }
+    public func visualGramDismissGiftPreview() { self.dismissAnimated() }
 }
 public final class GiftMarket: ViewController, VisualGramGiftFlowController { public var visualGramGiftCompletion: (() -> Void)? }
 public final class GiftOptions: ViewController, GiftOptionsScreenProtocol, VisualGramGiftFlowController { public var visualGramGiftCompletion: (() -> Void)? }
