@@ -36,7 +36,7 @@ public extension VisualGramLocalAppearance {
                       case let .unique(gift) = local.gift, !gift.flags.contains(.isBurned),
                       let chance = gift.craftChancePermille, chance > 0, chance <= 1000,
                       uniques.first.map({ $0.giftId == gift.giftId }) ?? true else { return }
-                if let time = local.canCraftAt, now < time { result = .failure(.tooEarly(time - now)); return }
+                if let time = local.canCraftAt, now < time { result = .failure(.tooEarly(time)); return }
                 inputs.append(local); uniques.append(gift)
             }
             let chance = min(1000, uniques.reduce(0) { $0 + Int($1.craftChancePermille ?? 0) })
@@ -76,7 +76,7 @@ public extension VisualGramLocalAppearance {
                 crafted.date = now; crafted.counterpartyId = nil; crafted.text = ""
                 crafted.isHistoryOnly = false; crafted.isCrafted = true; crafted.canCraftAt = nil
                 crafted.savedToProfile = true; crafted.pinnedToTop = false; crafted.collectionIds = nil
-                crafted.resaleStars = nil; crafted.purchaseStars = nil; crafted.purchaseBuyerId = nil
+                crafted.resaleStars = nil; crafted.purchaseStars = nil; crafted.purchaseGrams = nil; crafted.purchaseBuyerId = nil
                 owner.gifts.append(crafted)
                 result = .success(crafted)
             } else { result = .failure(.craftFailed) }
