@@ -43,11 +43,20 @@ if case .failure(.unavailable) = store.craftLocalGifts(accountId: b, references:
 assert(countOwned() == 2)
 if case .failure(.unavailable) = store.craftLocalGifts(accountId: a, references: refs, attributes: [.pattern(2)], attributePermilles: probabilities, now: 100) {} else { assertionFailure("missing model") }
 assert(countOwned() == 2)
+store.values["10"]?.gifts[0].canCraftAt = 5000
+if case let .failure(.tooEarly(date)) = store.craftLocalGifts(accountId: a, references: refs, attributes: attributes, attributePermilles: probabilities, now: 1000) {
+    assert(date == 5000, "native date formatter needs the absolute unlock time")
+} else { assertionFailure("early craft consumed locked gifts") }
+assert(countOwned() == 2)
+store.values["10"]?.gifts[0].canCraftAt = nil
+store.values["10"]?.gifts[0].purchaseGrams = 250000000
 if case let .success(result) = store.craftLocalGifts(accountId: a, references: refs, attributes: attributes, attributePermilles: probabilities, now: 100, random: { $0.lowerBound }) {
     assert(result.isCrafted == true && result.gift != first.gift && result.savedToProfile == true)
+    assert(result.purchaseGrams == nil && result.purchaseStars == nil)
     assert(countOwned() == 1)
     if case let .unique(gift) = result.gift { assert(gift.id == 1 && gift.craftChancePermille == nil && gift.attributes[0] == attributes[0]) }
 } else { assertionFailure("guaranteed craft did not succeed") }
+assert(store.appearance(accountId: a).gifts.filter { $0.isHistoryOnly == true }.count == 2)
 assert(store.craftableLocalGifts(accountId: a, giftId: 42, now: 101).isEmpty)
 if case .failure(.unavailable) = store.craftLocalGifts(accountId: a, references: refs, attributes: attributes, attributePermilles: probabilities, now: 101) {} else { assertionFailure("replayed craft") }
 store.values["10"] = .init(enabled: true, gifts: [first], stars: 100)
@@ -66,7 +75,7 @@ assert(store.appearance(accountId: a).grams == 10_000_000_000)
 let data = try JSONEncoder().encode(store.values)
 store.values = try JSONDecoder().decode([String: VisualGramAppearance].self, from: data)
 assert(store.appearance(accountId: a).grams == 10_000_000_000 && store.appearance(accountId: a).gifts.last?.purchaseGrams == 1_250_000_000)
-print("PASS: GRAM precision/overflow, conversion, debit/history, duplicate/insufficient balance, persistence; craft success/failure/consumption, owner and replay guards")
+print("PASS: GRAM precision/overflow, conversion, debit/history, duplicate/insufficient balance, persistence; craft success/failure/consumption, retained history, unlock date, owner and replay guards")
 '''
 
 

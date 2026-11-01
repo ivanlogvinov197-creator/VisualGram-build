@@ -58,6 +58,11 @@ def apply_november(root, project):
     craft = ui / 'Gifts/GiftCraftScreen/Sources/GiftCraftScreen.swift'
     replace(craft, 'let craftContext = CraftGiftsContext(account: context.account, giftId: gift.giftId)', 'let local = VisualGramLocalAppearance.shared.localReference(slug: gift.slug).map { VisualGramLocalAppearance.shared.canManageLocalGift(accountId: context.account.peerId, reference: $0) } ?? false\n        let craftContext = CraftGiftsContext(account: context.account, giftId: gift.giftId, visualGramLocal: local)')
     replace(craft, 'craftContext.craft(references: references)', 'craftContext.craft(references: references, visualGramAttributePermilles: GiftCraftConfiguration.with(appConfiguration: component.context.currentAppConfiguration.with { $0 }).craftAttributePermilles)')
+    # Local consumption and insertion are already committed atomically by the
+    # local store. Native optimistic cache updates would delete its history and
+    # leak the synthetic result into server-only presentation after disabling it.
+    replace(craft, '                                controller.profileGiftsContext?.removeStarGifts(references: references)\n', '                                if !component.craftContext.visualGramLocal { controller.profileGiftsContext?.removeStarGifts(references: references) }\n')
+    replace(craft, '                                        controller.profileGiftsContext?.insertStarGifts(gifts: [gift], afterPinned: true)\n', '                                        if !component.craftContext.visualGramLocal { controller.profileGiftsContext?.insertStarGifts(gifts: [gift], afterPinned: true) }\n')
     view = ui / 'Gifts/GiftViewScreen/Sources/GiftViewScreen.swift'
     replace(view, '        func craftGift() {\n', '        func craftGift() {\n            if VisualGramLocalAppearance.isLocalReference(self.subject.arguments?.reference), !VisualGramLocalAppearance.shared.canManageLocalGift(accountId: self.context.account.peerId, reference: self.subject.arguments?.reference) { return }\n')
 
