@@ -1,8 +1,11 @@
 # Telegram with local visual profiles
 
-Build patches for official Telegram-iOS revision `6ad963e5b62d354da79040f388ae2b9132fb17b8`.
+Build patches for official Telegram-iOS revision `279f89e4d4f63f17227bf877dc3d8990f22ecd58`.
 These patches provide local gifts, scheduled gift delivery, profile appearance,
 chat badges and shared appearance across accounts on the same device.
+Telegram 13.1.2 adds local gift crafting, a GRAM balance and transaction history,
+NFT-decorated wallet cards, native profile/business editors and a gift grid with drag reorder.
+Subscription and trial restrictions are not included.
 They do not change server ownership, payments, verification or subscriptions.
 The display name is Telegram. Tap Chats three times within one second between
 taps to open VisualGram. Appearance controls are hidden from Settings and profiles.
