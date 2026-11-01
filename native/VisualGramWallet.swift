@@ -17,10 +17,13 @@ public extension VisualGramLocalAppearance {
     }
 
     func localGramPrice(accountId: EnginePeer.Id, gift: StarGift.UniqueGift) -> Int64? {
+        return Self.gramPrice(gift: gift, starsPerUnit: self.appearance(accountId: accountId).gramStarsPerUnit)
+    }
+
+    private static func gramPrice(gift: StarGift.UniqueGift, starsPerUnit: Int64?) -> Int64? {
         if let amount = gift.resellAmounts?.first(where: { $0.currency == .ton })?.amount.value, amount > 0 { return amount }
-        let value = self.appearance(accountId: accountId)
         guard let price = gift.resellAmounts?.first(where: { $0.currency == .stars })?.amount.value,
-              price > 0, let rate = value.gramStarsPerUnit, rate > 0 else { return nil }
+              price > 0, let rate = starsPerUnit, rate > 0 else { return nil }
         var raw = Decimal(price) * Decimal(Self.gramScale) / Decimal(rate)
         var rounded = Decimal()
         NSDecimalRound(&rounded, &raw, 0, .up)
@@ -57,18 +60,17 @@ public extension VisualGramLocalAppearance {
     }
 
     func buyLocalGiftWithGrams(accountId: EnginePeer.Id, recipientPeerId: EnginePeer.Id, gift: StarGift.UniqueGift, price: Int64, requireListing: Bool, now: Int32) -> VisualGramGiftPurchaseResult {
-        guard price > 0, localGramPrice(accountId: accountId, gift: gift) == price else { return .priceChanged }
+        guard price > 0 else { return .priceChanged }
         var result: VisualGramGiftPurchaseResult = .unavailable
         self.updateValues { values in
             let buyerKey = String(accountId.toInt64())
             guard var buyer = values[buyerKey], buyer.enabled, let balance = buyer.grams else { result = .invalid; return }
+            guard Self.gramPrice(gift: gift, starsPerUnit: buyer.gramStarsPerUnit) == price else { result = .priceChanged; return }
             guard balance >= price else { result = .insufficientBalance; return }
-            var seller: (String, Int)?
-            for (key, value) in values {
-                if let index = value.gifts.firstIndex(where: { $0.direction == .received && $0.isHistoryOnly != true && $0.assetIdentifier == "unique:" + gift.slug }) { seller = (key, index); break }
-            }
-            if let (key, index) = seller {
-                guard key != buyerKey, key != String(recipientPeerId.toInt64()), let sellerRawId = Int64(key), var sellerValue = values[key], sellerValue.enabled,
+            let seller = Self.localGiftSeller(values: values, gift: gift)
+            if let (sellerId, index) = seller {
+                let sellerRawId = sellerId.toInt64(), key = String(sellerId.toInt64())
+                guard key != buyerKey, key != String(recipientPeerId.toInt64()), var sellerValue = values[key], sellerValue.enabled,
                       let askingStars = sellerValue.gifts[index].resaleStars, askingStars > 0,
                       let rate = buyer.gramStarsPerUnit, rate > 0 else { return }
                 var raw = Decimal(askingStars) * Decimal(Self.gramScale) / Decimal(rate)

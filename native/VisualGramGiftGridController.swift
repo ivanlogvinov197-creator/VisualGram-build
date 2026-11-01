@@ -10,7 +10,25 @@ import GiftItemComponent
 
 private final class VisualGramGiftCell: UICollectionViewCell {
     private let component = ComponentView<Empty>()
+    private var parameters: (AccountContext, VisualGramGift, EnginePeer.Id, Bool)?
+    private var renderedSize = CGSize.zero
+    private var needsComponentUpdate = false
     func update(context: AccountContext, gift: VisualGramGift, target: EnginePeer.Id, selected: Bool) {
+        self.parameters = (context, gift, target, selected)
+        self.needsComponentUpdate = true
+        self.updateComponent()
+        self.setNeedsLayout()
+    }
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        self.updateComponent()
+    }
+    private func updateComponent() {
+        guard let (context, gift, target, selected) = self.parameters,
+              self.contentView.bounds.width > 0, self.contentView.bounds.height > 0,
+              self.needsComponentUpdate || self.renderedSize != self.contentView.bounds.size else { return }
+        self.needsComponentUpdate = false
+        self.renderedSize = self.contentView.bounds.size
         let data = context.sharedContext.currentPresentationData.with { $0 }
         let subject: GiftItemComponent.Subject
         switch gift.displayGift(accountId: target) {
@@ -85,16 +103,19 @@ final class VisualGramGiftGridController: ViewController, UICollectionViewDataSo
 
     override func containerLayoutUpdated(_ layout: ContainerViewLayout, transition: ContainedViewLayoutTransition) {
         super.containerLayoutUpdated(layout, transition: transition)
-        let top = max(layout.safeInsets.top, layout.statusBarHeight ?? 0) + 52
-        self.help.frame = CGRect(x: 16, y: top, width: layout.size.width - 32, height: 44)
-        self.toolbar.frame = CGRect(x: 12, y: layout.size.height - layout.safeInsets.bottom - 60, width: layout.size.width - 24, height: 48)
-        self.grid.frame = CGRect(x: 12, y: top + 52, width: layout.size.width - 24, height: max(0, self.toolbar.frame.minY - top - 60))
+        let top = max(layout.safeInsets.top, self.navigationLayout(layout: layout).navigationFrame.maxY)
+        let left = layout.safeInsets.left + 12
+        let width = max(0, layout.size.width - left - layout.safeInsets.right - 12)
+        let bottom = max(layout.safeInsets.bottom, layout.intrinsicInsets.bottom)
+        self.help.frame = CGRect(x: left + 4, y: top, width: max(0, width - 8), height: 44)
+        self.toolbar.frame = CGRect(x: left, y: layout.size.height - bottom - 60, width: width, height: 48)
+        self.grid.frame = CGRect(x: left, y: top + 52, width: width, height: max(0, self.toolbar.frame.minY - top - 60))
         self.grid.collectionViewLayout.invalidateLayout()
     }
 
     func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int { self.items.count }
     func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, sizeForItemAt indexPath: IndexPath) -> CGSize {
-        let width = floor((collectionView.bounds.width - 16) / 3)
+        let width = max(1, floor((collectionView.bounds.width - 16) / 3))
         return CGSize(width: width, height: width * 1.32)
     }
     func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
@@ -119,24 +140,48 @@ final class VisualGramGiftGridController: ViewController, UICollectionViewDataSo
         self.saveAction(button.tag)
     }
     private func saveAction(_ action: Int) {
+        if !self.cardMode && action == 3 {
+            VisualGramLocalAppearance.shared.removeLocalGifts(accountId: self.context.account.peerId, targetPeerId: self.target, identifiers: self.selected)
+            return
+        }
+        let configuration = self.context.currentAppConfiguration.with { $0 }
+        let configuredLimit = configuration.data?["stargifts_pinned_to_top_limit"] as? Double ?? 6
+        let pinLimit = configuredLimit.isFinite && configuredLimit >= 0 && configuredLimit < Double(Int.max) ? Int(configuredLimit) : 6
+        var error: String?
         VisualGramLocalAppearance.shared.update(accountId: self.context.account.peerId, targetPeerId: self.target) { value in
+            let owned = value.gifts.filter { $0.direction == .received && $0.isHistoryOnly != true }
+            let selectedOwnedIds = Set(owned.filter { self.selected.contains($0.identifier) }.map { $0.identifier })
+            guard !selectedOwnedIds.isEmpty else { error = "Список подарков изменился. Выбери подарок ещё раз."; return }
             if self.cardMode {
-                let ids = self.items.filter { self.selected.contains($0.identifier) }.map { $0.identifier }
+                let validIds = Set(owned.compactMap { gift -> String? in if case .unique = gift.gift { return gift.identifier }; return nil })
+                let current = (value.gramCardGiftIds ?? []).filter { validIds.contains($0) }
+                let ids = self.items.filter { selectedOwnedIds.contains($0.identifier) && validIds.contains($0.identifier) }.map { $0.identifier }
                 switch action {
-                case 0: value.gramCardGiftIds = Array(((value.gramCardGiftIds ?? []).filter { !self.selected.contains($0) } + ids).suffix(10))
-                case 1: if ids.count == 1 { value.gramCardGiftIds = [ids[0]] + (value.gramCardGiftIds ?? []).filter { $0 != ids[0] }.prefix(9); value.gramCardBackgroundId = ids[0] }
-                default: value.gramCardGiftIds?.removeAll { self.selected.contains($0) }; if let id = value.gramCardBackgroundId, self.selected.contains(id) { value.gramCardBackgroundId = nil }
+                case 0:
+                    let combined = current.filter { !selectedOwnedIds.contains($0) } + ids
+                    guard combined.count <= 10 else { error = "На карточку можно добавить до 10 NFT."; return }
+                    value.gramCardGiftIds = combined
+                case 1:
+                    guard ids.count == 1 else { error = "Выбери один NFT для фона."; return }
+                    let combined = [ids[0]] + current.filter { $0 != ids[0] }
+                    guard combined.count <= 10 else { error = "Сначала убери один NFT с карточки."; return }
+                    value.gramCardGiftIds = combined; value.gramCardBackgroundId = ids[0]
+                default: value.gramCardGiftIds = current.filter { !selectedOwnedIds.contains($0) }; if let id = value.gramCardBackgroundId, selectedOwnedIds.contains(id) { value.gramCardBackgroundId = nil }
                 }
-            } else if action == 3 { value.gifts.removeAll { self.selected.contains($0.identifier) } }
-            else {
-                let alreadyPinned = value.gifts.filter { $0.pinnedToTop == true && !self.selected.contains($0.identifier) }.count
-                guard action != 2 || alreadyPinned + self.selected.count <= 6 else { return }
-                for index in value.gifts.indices where self.selected.contains(value.gifts[index].identifier) {
+            } else {
+                let alreadyPinned = value.gifts.filter { $0.direction == .received && $0.isHistoryOnly != true && $0.pinnedToTop == true && !self.selected.contains($0.identifier) }.count
+                guard action != 2 || alreadyPinned + selectedOwnedIds.count <= pinLimit else { error = "Можно закрепить до \(pinLimit) подарков."; return }
+                for index in value.gifts.indices where selectedOwnedIds.contains(value.gifts[index].identifier) {
                     value.gifts[index].savedToProfile = action != 1
                     if action == 1 { value.gifts[index].pinnedToTop = false }
                     else if action == 2 { value.gifts[index].pinnedToTop = true }
                 }
             }
+        }
+        if let error {
+            let alert = UIAlertController(title: nil, message: error, preferredStyle: .alert)
+            alert.addAction(UIAlertAction(title: "OK", style: .default))
+            self.present(alert, animated: true)
         }
     }
     func collectionView(_ collectionView: UICollectionView, itemsForBeginning session: UIDragSession, at indexPath: IndexPath) -> [UIDragItem] {

@@ -84,6 +84,19 @@ public extension VisualGramLocalAppearance {
         return changed
     }
 
+    internal static func localGiftSeller(values: [String: VisualGramAppearance], gift: StarGift.UniqueGift) -> (EnginePeer.Id, Int)? {
+        var candidates: [(EnginePeer.Id, Int)] = []
+        for (key, value) in values where value.enabled {
+            guard let rawId = Int64(key) else { continue }
+            if let index = value.gifts.firstIndex(where: { $0.direction == .received && $0.isHistoryOnly != true && $0.assetIdentifier == "unique:" + gift.slug }) {
+                candidates.append((EnginePeer.Id(rawId), index))
+            }
+        }
+        if candidates.count == 1 { return candidates[0] }
+        if case let .peerId(ownerId) = gift.owner { return candidates.first { $0.0 == ownerId } }
+        return nil
+    }
+
     func buyLocalGift(accountId: EnginePeer.Id, recipientPeerId: EnginePeer.Id, gift: StarGift.UniqueGift, price: Int64, requireListing: Bool, now: Int32) -> VisualGramGiftPurchaseResult {
         guard price > 0, price <= Int64(Int32.max) else { return .invalid }
         var result: VisualGramGiftPurchaseResult = .unavailable
@@ -91,14 +104,7 @@ public extension VisualGramLocalAppearance {
             let buyerKey = String(accountId.toInt64())
             guard var buyer = values[buyerKey], buyer.enabled, let balance = buyer.stars else { result = .invalid; return }
             guard balance >= price else { result = .insufficientBalance; return }
-            var seller: (EnginePeer.Id, Int)?
-            for (key, value) in values where value.enabled {
-                guard let rawId = Int64(key) else { continue }
-                if let index = value.gifts.firstIndex(where: { local in
-                    guard local.direction == .received, local.isHistoryOnly != true, case let .unique(unique) = local.gift else { return false }
-                    return unique.slug == gift.slug
-                }) { seller = (EnginePeer.Id(rawId), index); break }
-            }
+            let seller = Self.localGiftSeller(values: values, gift: gift)
             if let (sellerId, index) = seller {
                 guard sellerId != accountId, sellerId != recipientPeerId else { return }
                 let sellerKey = String(sellerId.toInt64())

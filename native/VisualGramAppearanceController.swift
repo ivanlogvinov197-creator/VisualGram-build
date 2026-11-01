@@ -481,22 +481,12 @@ private final class VisualGramAppearanceActions {
         guard self.appearance.gifts.indices.contains(index), self.controller != nil else { return }
         let local = self.appearance.gifts[index]
         let alert = UIAlertController(title: "Подарок", message: nil, preferredStyle: .alert)
-        if index > 0 {
-            alert.addAction(UIAlertAction(title: "Переместить выше", style: .default, handler: { [weak self] _ in
-                guard let self else { return }
-                VisualGramLocalAppearance.shared.moveGift(accountId: self.context.account.peerId, targetPeerId: self.targetPeerId, identifier: local.identifier, offset: -1)
-            }))
-        }
-        if index + 1 < self.appearance.gifts.count {
-            alert.addAction(UIAlertAction(title: "Переместить ниже", style: .default, handler: { [weak self] _ in
-                guard let self else { return }
-                VisualGramLocalAppearance.shared.moveGift(accountId: self.context.account.peerId, targetPeerId: self.targetPeerId, identifier: local.identifier, offset: 1)
-            }))
-        }
         if local.direction == .received && local.isHistoryOnly != true && self.targetPeerId == self.context.account.peerId {
             alert.addAction(UIAlertAction(title: (local.pinnedToTop ?? false) ? "Открепить" : "Закрепить", style: .default, handler: { [weak self] _ in
                 guard let self else { return }
-                if !(local.pinnedToTop ?? false), self.appearance.gifts.filter({ $0.pinnedToTop ?? false }).count >= 6 { self.message("Можно закрепить до 6 подарков."); return }
+                let configuredLimit = self.context.currentAppConfiguration.with { $0 }.data?["stargifts_pinned_to_top_limit"] as? Double ?? 6
+                let limit = configuredLimit.isFinite && configuredLimit >= 0 && configuredLimit < Double(Int.max) ? Int(configuredLimit) : 6
+                if !(local.pinnedToTop ?? false), self.appearance.gifts.filter({ $0.direction == .received && $0.isHistoryOnly != true && $0.pinnedToTop == true }).count >= limit { self.message("Можно закрепить до \(limit) подарков."); return }
                 _ = VisualGramLocalAppearance.shared.updateGift(accountId: self.context.account.peerId, reference: local.reference(accountId: self.targetPeerId)) { $0.pinnedToTop = !($0.pinnedToTop ?? false); if $0.pinnedToTop == true { $0.savedToProfile = true } }
             }))
             alert.addAction(UIAlertAction(title: (local.savedToProfile ?? true) ? "Скрыть из профиля" : "Показать в профиле", style: .default, handler: { [weak self] _ in
@@ -522,7 +512,10 @@ private final class VisualGramAppearanceActions {
                     case let .unique(gift): subject = .uniqueGift(gift, nil)
                     case let .generic(gift): subject = .soldOutGift(gift)
                     }
-                    screen = GiftViewScreen(context: self.context, subject: subject, customAction: .init(title: "Удалить", action: { [weak self] in self?.update { $0.gifts.removeAll { $0.identifier == local.identifier } } }))
+                    screen = GiftViewScreen(context: self.context, subject: subject, customAction: .init(title: "Удалить", action: { [weak self] in
+                        guard let self else { return }
+                        VisualGramLocalAppearance.shared.removeLocalGifts(accountId: self.context.account.peerId, targetPeerId: self.targetPeerId, identifiers: [local.identifier])
+                    }))
                     screen.visualGramPreview = true
                 } else {
                     screen = GiftViewScreen(context: self.context, subject: .profileGift(self.targetPeerId, local.profileGift(accountId: self.targetPeerId, sender: sender)))
@@ -533,14 +526,17 @@ private final class VisualGramAppearanceActions {
                 self.disposables.add((self.context.engine.data.get(TelegramEngine.EngineData.Item.Peer.Peer(id: EnginePeer.Id(senderId))) |> deliverOnMainQueue).start(next: show))
             } else { show(nil) }
         }))
-        if local.direction == .received, case let .unique(gift) = local.displayGift(accountId: self.targetPeerId) {
+        if local.direction == .received, local.isHistoryOnly != true, case let .unique(gift) = local.displayGift(accountId: self.targetPeerId) {
             alert.addAction(UIAlertAction(title: "Поставить в статус", style: .default, handler: { [weak self] _ in
-                guard let self else { return }
+                guard let self, self.appearance.gifts.contains(where: { $0.identifier == local.identifier && $0.direction == .received && $0.isHistoryOnly != true }) else { return }
                 self.update { $0.enabled = true; $0.premium = true }
                 _ = VisualGramLocalAppearance.shared.setLocalGiftStatus(accountId: self.context.account.peerId, targetPeerId: self.targetPeerId, gift: gift, expirationDate: nil)
             }))
         }
-        alert.addAction(UIAlertAction(title: "Удалить", style: .destructive, handler: { [weak self] _ in self?.update { $0.gifts.removeAll { $0.identifier == local.identifier } } }))
+        alert.addAction(UIAlertAction(title: "Удалить", style: .destructive, handler: { [weak self] _ in
+            guard let self else { return }
+            VisualGramLocalAppearance.shared.removeLocalGifts(accountId: self.context.account.peerId, targetPeerId: self.targetPeerId, identifiers: [local.identifier])
+        }))
         alert.addAction(UIAlertAction(title: "Отмена", style: .cancel))
         self.presentNative(alert)
     }

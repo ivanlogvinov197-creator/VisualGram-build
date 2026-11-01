@@ -212,6 +212,24 @@ public extension VisualGramLocalAppearance {
         return true
     }
 
+    func removeLocalGifts(accountId: EnginePeer.Id, targetPeerId: EnginePeer.Id? = nil, identifiers: Set<String>) {
+        self.update(accountId: accountId, targetPeerId: targetPeerId) { value in
+            if case let .starGift(id, _, _, _, _, _, _, _, _) = value.emojiStatus?.content,
+               value.gifts.contains(where: { local in
+                   guard identifiers.contains(local.identifier), local.direction == .received, local.isHistoryOnly != true,
+                         case let .unique(gift) = local.gift else { return false }
+                   return gift.id == id
+               }) {
+                value.overridesEmojiStatus = true
+                value.emojiStatus = nil
+            }
+            value.gifts.removeAll { identifiers.contains($0.identifier) }
+            value.giftOrder?.removeAll { identifiers.contains($0) }
+            value.gramCardGiftIds?.removeAll { identifiers.contains($0) }
+            if let id = value.gramCardBackgroundId, identifiers.contains(id) { value.gramCardBackgroundId = nil }
+        }
+    }
+
     func reorderGifts(accountId: EnginePeer.Id, targetPeerId: EnginePeer.Id? = nil, references: [StarGiftReference], updatePins: Bool = false) {
         let target = targetPeerId ?? accountId
         self.update(accountId: accountId, targetPeerId: target) { value in
