@@ -133,7 +133,8 @@ final class VisualGramGiftGridController: ViewController, UICollectionViewDataSo
                 guard action != 2 || alreadyPinned + self.selected.count <= 6 else { return }
                 for index in value.gifts.indices where self.selected.contains(value.gifts[index].identifier) {
                     value.gifts[index].savedToProfile = action != 1
-                    value.gifts[index].pinnedToTop = action == 2
+                    if action == 1 { value.gifts[index].pinnedToTop = false }
+                    else if action == 2 { value.gifts[index].pinnedToTop = true }
                 }
             }
         }
