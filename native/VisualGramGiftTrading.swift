@@ -256,12 +256,22 @@ public extension VisualGramLocalAppearance {
         }
     }
 
-    func localMarketState(_ server: ResaleGiftsContext.State, giftId: Int64, accountId: EnginePeer.Id) -> ResaleGiftsContext.State {
+    internal static func uniqueMarketOffers(_ gifts: [StarGift]) -> [StarGift] {
+        var slugs = Set<String>()
+        return gifts.filter { gift in
+            if case let .unique(unique) = gift { return slugs.insert(unique.slug).inserted }
+            return true
+        }
+    }
+
+    func localMarketState(_ server: ResaleGiftsContext.State, giftId: Int64, accountId: EnginePeer.Id, forCrafting: Bool = false) -> ResaleGiftsContext.State {
         var result = server
         var local: [StarGift] = []
-        for (key, value) in self.snapshotValues() where value.enabled {
+        for (key, value) in self.snapshotValues().sorted(by: { $0.key < $1.key }) where value.enabled {
             guard let rawId = Int64(key) else { continue }
+            let craftableIds: Set<String>? = forCrafting ? Set(self.craftableLocalGifts(accountId: EnginePeer.Id(rawId), giftId: giftId, now: Int32(clamping: Int64(Date().timeIntervalSince1970))).map { $0.identifier }) : nil
             for item in value.gifts where item.direction == .received && item.isHistoryOnly != true && (item.resaleStars ?? 0) > 0 {
+                if let craftableIds, !craftableIds.contains(item.identifier) { continue }
                 if case let .unique(gift) = item.gift, gift.giftId == giftId {
                     let displayed = item.displayGift(accountId: EnginePeer.Id(rawId))
                     if server.filterAttributes.allSatisfy({ attribute in
@@ -274,6 +284,7 @@ public extension VisualGramLocalAppearance {
                 }
             }
         }
+        local = Self.uniqueMarketOffers(local)
         let localSlugs = Set(local.compactMap { if case let .unique(gift) = $0 { return gift.slug }; return nil as String? })
         result.gifts = local + server.gifts.filter { if case let .unique(gift) = $0 { return !localSlugs.contains(gift.slug) }; return true }
         if server.sorting == .value {
