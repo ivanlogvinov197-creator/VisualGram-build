@@ -55,6 +55,7 @@ jobs:
         run: |
           python3 scripts/prepare_native.py telegram-native --configuration "$RUNNER_TEMP/native-configuration.json"
           python3 scripts/apply_native_features.py telegram-native
+          python3 telegram-native/build-system/Make/PostboxImportCheck.py telegram-native
           xcrun swiftc -frontend -parse native/*.swift
           xcrun swiftc -frontend -parse telegram-native/submodules/TelegramUI/Components/ChatTitleView/Sources/ChatTitleComponent.swift
           xcrun swiftc -frontend -parse telegram-native/submodules/TelegramUI/Components/Gifts/GiftViewScreen/Sources/GiftViewScreen.swift telegram-native/submodules/TelegramUI/Components/Gifts/GiftViewScreen/Sources/GiftViewBuyGift.swift
