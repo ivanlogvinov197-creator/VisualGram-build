@@ -33,7 +33,7 @@ def apply_trading(root):
     start = text.index('public final class ResaleGiftsContext {')
     resale = text[start:]
     resale = resale.replace('    private let queue: Queue = .mainQueue()\n', '    private let visualGramAccount: Account\n    private let visualGramGiftId: Int64\n    private let queue: Queue = .mainQueue()\n', 1)
-    resale = resale.replace('    public var state: Signal<ResaleGiftsContext.State, NoError> {\n        return Signal { subscriber in', '    public var state: Signal<ResaleGiftsContext.State, NoError> {\n        return combineLatest(self.visualGramServerState, VisualGramLocalAppearance.shared.changes) |> map { state, _ in\n            VisualGramLocalAppearance.shared.localMarketState(state, giftId: self.visualGramGiftId, accountId: self.visualGramAccount.peerId)\n        }\n    }\n\n    private var visualGramServerState: Signal<ResaleGiftsContext.State, NoError> {\n        return Signal { subscriber in', 1)
+    resale = resale.replace('    public var state: Signal<ResaleGiftsContext.State, NoError> {\n        return Signal { subscriber in', '    public var state: Signal<ResaleGiftsContext.State, NoError> {\n        return combineLatest(self.visualGramServerState, VisualGramLocalAppearance.shared.changes) |> map { state, _ in\n            VisualGramLocalAppearance.shared.localMarketState(state, giftId: self.visualGramGiftId, accountId: self.visualGramAccount.peerId, forCrafting: self.forCrafting)\n        }\n    }\n\n    private var visualGramServerState: Signal<ResaleGiftsContext.State, NoError> {\n        return Signal { subscriber in', 1)
     resale = resale.replace('        self.forCrafting = forCrafting\n', '        self.visualGramAccount = account\n        self.visualGramGiftId = giftId\n        self.forCrafting = forCrafting\n', 1)
     resale = resale.replace('    public func updateStarGiftResellPrice(slug: String, price: CurrencyAmount?) -> Signal<Never, UpdateStarGiftPriceError> {\n', '''    public func updateStarGiftResellPrice(slug: String, price: CurrencyAmount?) -> Signal<Never, UpdateStarGiftPriceError> {
         if let reference = VisualGramLocalAppearance.shared.localReference(slug: slug) {
@@ -41,7 +41,7 @@ def apply_trading(root):
             return VisualGramLocalAppearance.shared.listLocalGift(accountId: self.visualGramAccount.peerId, reference: reference, price: price?.amount.value) ? .complete() : .fail(.generic)
         }
 ''', 1)
-    resale = resale.replace('        return state\n    }\n}', '        return state.map { VisualGramLocalAppearance.shared.localMarketState($0, giftId: self.visualGramGiftId, accountId: self.visualGramAccount.peerId) }\n    }\n}', 1)
+    resale = resale.replace('        return state\n    }\n}', '        return state.map { VisualGramLocalAppearance.shared.localMarketState($0, giftId: self.visualGramGiftId, accountId: self.visualGramAccount.peerId, forCrafting: self.forCrafting) }\n    }\n}', 1)
     core.write_text(text[:start] + resale, encoding='utf-8')
 
     pane = root / 'submodules/TelegramUI/Components/PeerInfo/PeerInfoVisualMediaPaneNode/Sources/PeerInfoGiftsPaneNode.swift'

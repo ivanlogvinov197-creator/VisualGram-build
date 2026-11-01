@@ -90,6 +90,15 @@ for sellerId in [b, c] {
 assert(gramMarket.buyLocalGiftWithGrams(accountId: a, recipientPeerId: a, gift: nft(25, ownerId: c), price: 1_250_000_000, requireListing: true, now: 400) == .success)
 assert(gramMarket.appearance(accountId: a).grams == 1_250_000_000 && gramMarket.appearance(accountId: b).grams == 0 && gramMarket.appearance(accountId: c).grams == 1_250_000_000)
 assert(gramMarket.appearance(accountId: a).stars == 100)
+let eligibility = VisualGramLocalAppearance()
+var lockedInput = VisualGramGift(gift: .unique(nft(32)), counterpartyId: nil, date: 100, text: "")
+lockedInput.canCraftAt = 5000
+var consumedInput = VisualGramGift(gift: .unique(nft(33)), counterpartyId: nil, date: 100, text: "")
+consumedInput.isHistoryOnly = true
+let noChanceInput = VisualGramGift(gift: .unique(nft(34, chance: nil)), counterpartyId: nil, date: 100, text: "")
+eligibility.values["10"] = .init(enabled: true, gifts: [first, lockedInput, consumedInput, noChanceInput])
+assert(eligibility.craftableLocalGifts(accountId: a, giftId: 42, now: 1000).map { $0.identifier } == [first.identifier])
+assert(Set(eligibility.craftableLocalGifts(accountId: a, giftId: 42, now: 5000).map { $0.identifier }) == Set([first.identifier, lockedInput.identifier]))
 print("PASS: GRAM precision/overflow, conversion, debit/history, duplicate/insufficient balance, persistence; craft success/failure/consumption, retained history, unlock date, owner and replay guards")
 '''
 

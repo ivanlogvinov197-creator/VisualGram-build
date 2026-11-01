@@ -212,6 +212,8 @@ assert(overlap.appearance(accountId: a).stars == 100)
 assert(overlap.buyLocalGift(accountId: a, recipientPeerId: a, gift: unique(203, "Test-203", ownerId: c), price: 60, requireListing: true, now: 301) == .success)
 assert(overlap.appearance(accountId: a).stars == 40 && overlap.appearance(accountId: b).stars == 5 && overlap.appearance(accountId: c).stars == 65)
 assert(overlap.appearance(accountId: b).gifts.contains { $0.isHistoryOnly != true }, "purchase consumed another profile's visual copy")
+let offers = VisualGramLocalAppearance.uniqueMarketOffers([copyB.gift, copyC.gift, .unique(unique(204, "Test-204")), .generic(bear), .generic(bear)])
+assert(offers.count == 4 && offers[0] == copyB.gift, "duplicate NFT identity leaked into the market grid or ordinary copies were merged")
 print("PASS: overlapping visual NFT copies select the displayed seller and never a random profile")
 '''
 
