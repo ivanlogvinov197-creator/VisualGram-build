@@ -6,6 +6,10 @@ import TelegramCore
 import SwiftSignalKit
 import ConfettiEffect
 
+public protocol VisualGramGiftPreviewController: AnyObject {
+    func visualGramDismissGiftPreview()
+}
+
 // One completion path for local purchases and transfers. The attachment owner
 // closes its sheet; the navigation stack changes at most once.
 public func visualGramFinishGift(context: AccountContext, peerId: EnginePeer.Id, controller: ViewController, completion: (() -> Void)? = nil) {
@@ -39,9 +43,9 @@ public func visualGramFinishGift(context: AccountContext, peerId: EnginePeer.Id,
             navigationController.setViewControllers(controllers, animated: true)
         }
     }
-    if let giftController = controller as? GiftViewScreen, !wasInStack {
+    if let giftController = controller as? VisualGramGiftPreviewController, !wasInStack {
         // A presented preview is outside the navigation stack.
-        giftController.dismissAnimated()
+        giftController.visualGramDismissGiftPreview()
     }
     Queue.mainQueue().after(0.35) { [weak navigationController] in
         guard !UIAccessibility.isReduceMotionEnabled else { return }
