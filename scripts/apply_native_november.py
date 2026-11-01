@@ -72,6 +72,7 @@ def apply_november(root, project):
                 return data
             },
             self.forceIsContactPromise.get(),''')
+    replace(peer, 'card: (self.data?.cachedData as? CachedUserData)?.walletCard, sourceView:', 'card: (self.data?.serverCachedData as? CachedUserData)?.walletCard, sourceView:')
     wallet = ui / 'Wallet/PeerWalletScreen/Sources/PeerWalletScreen.swift'
     replace(wallet, '        private(set) var card: WalletCard?\n', '        private(set) var card: WalletCard?\n        private var serverCard: WalletCard?\n')
     replace(wallet, '            self.updateCard(card, context: context)\n', '''            self.updateCard(card, context: context)

@@ -62,7 +62,7 @@ public enum ProfileGiftsContext {
     public struct Filters: OptionSet { public let rawValue: Int; public init(rawValue: Int) { self.rawValue = rawValue }; static let displayed = Filters(rawValue: 1); static let hidden = Filters(rawValue: 2); static let unlimited = Filters(rawValue: 4); static let limitedUpgradable = Filters(rawValue: 8); static let limitedNonUpgradable = Filters(rawValue: 16); static let unique = Filters(rawValue: 32) }
     public enum Sorting { case date, value }
     public struct State {
-        public struct StarGift { let gift: SwiftGift; let reference: StarGiftReference; let owner: EnginePeer.Id; var date: Int32 = 0; var savedToProfile = true; var pinnedToTop = false }
+        public struct StarGift { let gift: SwiftGift; let reference: StarGiftReference?; let owner: EnginePeer.Id; var date: Int32 = 0; var savedToProfile = true; var pinnedToTop = false }
         var gifts: [StarGift] = []; var filteredGifts: [StarGift] = []; var count: Int32? = 0; var filter: Filters = [.displayed, .hidden]; var sorting: Sorting = .date
     }
 }
@@ -135,3 +135,4 @@ if __name__ == "__main__":
         swift.write_text(source(), encoding="utf-8")
         subprocess.run(["xcrun", "swiftc", str(swift), "-o", str(executable)], check=True)
         subprocess.run([str(executable)], check=True)
+
