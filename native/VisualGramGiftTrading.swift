@@ -186,7 +186,7 @@ public extension VisualGramLocalAppearance {
         return result
     }
 
-    private static func moveLocalGift(values: inout [String: VisualGramAppearance], ownerId: EnginePeer.Id, index: Int, recipientId: EnginePeer.Id, now: Int32, purchaseStars: Int64? = nil, buyerId: EnginePeer.Id? = nil) {
+    internal static func moveLocalGift(values: inout [String: VisualGramAppearance], ownerId: EnginePeer.Id, index: Int, recipientId: EnginePeer.Id, now: Int32, purchaseStars: Int64? = nil, purchaseGrams: Int64? = nil, buyerId: EnginePeer.Id? = nil) {
         let ownerKey = String(ownerId.toInt64()), targetKey = String(recipientId.toInt64())
         guard var owner = values[ownerKey], owner.gifts.indices.contains(index) else { return }
         let original = owner.gifts[index]
@@ -204,6 +204,7 @@ public extension VisualGramLocalAppearance {
         outgoing.isHistoryOnly = true
         outgoing.resaleStars = nil
         outgoing.purchaseStars = buyerId == recipientId ? purchaseStars : nil
+        outgoing.purchaseGrams = buyerId == recipientId ? purchaseGrams : nil
         outgoing.purchaseBuyerId = buyerId == recipientId ? buyerId?.toInt64() : nil
         owner.gifts.append(outgoing)
         if case let .unique(gift) = original.gift, case let .starGift(id, _, _, _, _, _, _, _, _) = owner.emojiStatus?.content, id == gift.id {
@@ -224,6 +225,7 @@ public extension VisualGramLocalAppearance {
         received.isTransferred = true
         received.resaleStars = nil
         received.purchaseStars = purchaseStars
+        received.purchaseGrams = purchaseGrams
         received.purchaseBuyerId = buyerId?.toInt64()
         received.pinnedToTop = false
         received.savedToProfile = true
@@ -276,6 +278,7 @@ public extension VisualGramLocalAppearance {
         } else if server.sorting == .number {
             result.gifts.sort { guard case let .unique(a) = $0, case let .unique(b) = $1 else { return false }; return a.number < b.number }
         }
+        result.gifts = result.gifts.map { if case let .unique(gift) = $0 { return .unique(self.giftForLocalPurchase(accountId: accountId, gift: gift)) }; return $0 }
         result.count = max(Int32(result.gifts.count), (server.count ?? 0) + Int32(local.count))
         return result
     }

@@ -12,6 +12,9 @@ import EntityKeyboard
 import EmojiStatusSelectionComponent
 import ChatScheduleTimeController
 import ConfettiEffect
+import PeerNameColorScreen
+import BusinessHoursSetupScreen
+import BusinessLocationSetupScreen
 
 private struct VisualGramAppearanceEntry: ItemListNodeEntry {
     enum Kind: Equatable { case toggle(Bool), button(String), info }
@@ -46,6 +49,7 @@ private final class VisualGramAppearanceActions {
     let context: AccountContext
     weak var controller: ItemListController?
     let disposables = DisposableSet()
+    let activeSection = ValuePromise<Int32>(0, ignoreRepeated: true)
     let expandedLists = ValuePromise<Int32>(0, ignoreRepeated: true)
     private var expandedListBits: Int32 = 0
     var targetPeerId: EnginePeer.Id
@@ -131,6 +135,8 @@ private final class VisualGramAppearanceActions {
     }
 
     func open(_ id: Int32) {
+        if (900...902).contains(id) { self.activeSection.set(id - 900); return }
+
         switch id {
         case 3: self.configureVerification()
         case 4: self.selectEmoji()
@@ -153,6 +159,26 @@ private final class VisualGramAppearanceActions {
             self.giftDate = Int32(Date().timeIntervalSince1970)
             self.giftText = ""
             self.importUniqueGift()
+        case 14:
+            self.controller?.push(UserAppearanceScreen(context: self.context, visualGramTarget: self.targetPeerId))
+        case 15:
+            self.controller?.push(BusinessHoursSetupScreen(context: self.context, initialValue: self.appearance.businessHours, completion: { _ in }, visualGramTarget: self.targetPeerId))
+        case 16:
+            self.controller?.push(BusinessLocationSetupScreen(context: self.context, initialValue: self.appearance.businessLocation, completion: { _ in }, visualGramTarget: self.targetPeerId))
+        case 27: self.openGrid()
+        case 32:
+            self.form(title: "Баланс GRAM", fields: [("GRAM", self.appearance.grams.map { VisualGramLocalAppearance.formatGrams($0) } ?? ""), ("Звёзд за 1 GRAM", self.appearance.gramStarsPerUnit.map(String.init) ?? "")]) { [weak self] values in
+                guard let self, values.count == 2 else { return }
+                if values[0].isEmpty { self.update { $0.grams = nil }; return }
+                guard let balance = VisualGramLocalAppearance.parseGrams(values[0]), let rate = Int64(values[1]), rate > 0 else { self.message("Проверь баланс и курс. Для GRAM можно указать до 9 знаков после запятой."); return }
+                self.update {
+                    let delta = balance - ($0.grams ?? 0)
+                    var history = $0.gramHistory ?? []
+                    if delta != 0 { history.append(.init(id: UUID().uuidString, date: Int32(clamping: Int64(Date().timeIntervalSince1970)), amount: delta, kind: delta > 0 ? .topUp : .adjustment, title: nil, peerId: nil, gift: nil)) }
+                    $0.grams = balance; $0.gramStarsPerUnit = rate; $0.gramHistory = history; $0.enabled = true
+                }
+            }
+        case 33: self.openGrid(cardMode: true)
         case 30:
             self.form(title: "Баланс звёзд", fields: [("Баланс", self.appearance.stars.map(String.init) ?? "")]) { [weak self] values in
                 guard let self, values.count == 1 else { return }
@@ -444,6 +470,13 @@ private final class VisualGramAppearanceActions {
         self.presentNative(alert)
     }
 
+    private func openGrid(cardMode: Bool = false) {
+        self.controller?.push(VisualGramGiftGridController(context: self.context, target: self.targetPeerId, cardMode: cardMode, openGift: { [weak self] id in
+            guard let self, let index = self.appearance.gifts.firstIndex(where: { $0.identifier == id }) else { return }
+            self.openGift(index: index)
+        }))
+    }
+
     private func openGift(index: Int) {
         guard self.appearance.gifts.indices.contains(index), self.controller != nil else { return }
         let local = self.appearance.gifts[index]
@@ -515,14 +548,23 @@ private final class VisualGramAppearanceActions {
 
 func visualGramAppearanceController(context: AccountContext) -> ViewController {
     let actions = VisualGramAppearanceActions(context: context)
-    let signal = combineLatest(context.sharedContext.presentationData, VisualGramLocalAppearance.shared.changes, actions.expandedLists.get())
+    let signal = combineLatest(context.sharedContext.presentationData, VisualGramLocalAppearance.shared.changes, actions.expandedLists.get(), actions.activeSection.get())
     |> deliverOnMainQueue
-    |> map { presentationData, _, expanded -> (ItemListControllerState, (ItemListNodeState, Any)) in
+    |> map { presentationData, _, expanded, activeSection -> (ItemListControllerState, (ItemListNodeState, Any)) in
         let value = actions.appearance
         var entries: [VisualGramAppearanceEntry] = []
         func add(_ id: Int32, _ section: Int32, _ title: String, _ kind: VisualGramAppearanceEntry.Kind) {
             entries.append(VisualGramAppearanceEntry(stableId: id, section: section, title: title, kind: kind, theme: presentationData.theme))
         }
+        add(900, -1, "Профиль", .button(activeSection == 0 ? "✓" : ""))
+        add(901, -1, "Подарки", .button(activeSection == 1 ? "✓" : ""))
+        add(902, -1, "Балансы", .button(activeSection == 2 ? "✓" : ""))
+        add(14, 1, "Цвета и фон профиля", .button(""))
+        add(15, 1, "Часы работы", .button(""))
+        add(16, 1, "Адрес", .button(""))
+        add(27, 2, "Мои подарки", .button("Сетка и порядок"))
+        add(32, 3, "Баланс GRAM", .button(value.grams.map { VisualGramLocalAppearance.formatGrams($0) } ?? "Не задан"))
+        add(33, 3, "Оформить карточку GRAM", .button(""))
         add(0, 0, "Оформление профиля", .toggle(value.enabled))
         add(1, 0, "Telegram Premium", .toggle(value.premium))
         add(2, 0, "Галочка Telegram", .toggle(value.verified))
@@ -530,7 +572,7 @@ func visualGramAppearanceController(context: AccountContext) -> ViewController {
         add(4, 0, "Эмодзи-статус", .button(""))
         add(5, 0, "Убрать статус", .button(""))
         add(6, 0, "Настройки профиля", .info)
-        add(7, 0, "Чей профиль оформить", .button(actions.targetTitle))
+        add(7, -1, "Чей профиль оформить", .button(actions.targetTitle))
         add(8, 0, "Выбрать исходный значок Major", .button(""))
         add(9, 0, "Сборка Telegram: \(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "—")", .info)
         add(10, 1, "Добавить NFT-юзернейм", .button(""))
@@ -546,12 +588,13 @@ func visualGramAppearanceController(context: AccountContext) -> ViewController {
         add(31, 3, "Добавить операцию", .button(""))
         add(40, 4, "Сбросить оформление", .button(""))
         add(25, 2, "Отложенные подарки появятся в выбранное время при открытом клиенте или при следующем открытии. ", .info)
-        add(26, 2, "Подарки (\(value.gifts.count))", .button(expanded & 2 == 0 ? "Развернуть" : "Свернуть"))
+
         if expanded & 1 != 0 {
         for (index, username) in value.usernames.enumerated() { add(1000 + Int32(index), 1, "@\(username.name)", .button("\(Double(username.tonAmount) / 1_000_000_000) TON")) }
         }
+        add(26, 2, "История подарков", .button(expanded & 2 == 0 ? "Развернуть" : "Свернуть"))
         if expanded & 2 != 0 {
-        for (index, local) in value.gifts.enumerated() {
+        for (index, local) in value.gifts.enumerated() where local.direction == .sent || local.isHistoryOnly == true {
             let title: String
             switch local.gift {
             case let .unique(gift): title = "\(gift.title) #\(gift.number)"
@@ -571,6 +614,17 @@ func visualGramAppearanceController(context: AccountContext) -> ViewController {
             case let .generic(gift): title = gift.title ?? "Подарок \(gift.id)"
             }
             add(3000 + Int32(index), 5, "Отложено: \(title)", .button(formatter.string(from: Date(timeIntervalSince1970: TimeInterval(pending.deliveryDate)))))
+        }
+        entries.removeAll { entry in
+            if entry.stableId >= 900 && entry.stableId <= 902 { return false }
+            if entry.stableId == 7 { return false }
+            if entry.stableId == 0 { return activeSection != 0 }
+            if entry.stableId == 6 || entry.stableId == 9 { return true }
+            switch activeSection {
+            case 1: return entry.section != 2 && entry.section != 5
+            case 2: return entry.section != 3
+            default: return entry.section != 0 && entry.section != 1 && entry.section != 4
+            }
         }
         entries.sort()
         let controllerState = ItemListControllerState(presentationData: ItemListPresentationData(presentationData), title: .text("VisualGram"), leftNavigationButton: nil, rightNavigationButton: nil, backNavigationButton: ItemListBackButton(title: presentationData.strings.Common_Back))

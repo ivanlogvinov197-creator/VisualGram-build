@@ -78,6 +78,7 @@ public extension VisualGramLocalAppearance {
             guard value.gifts.indices.contains(destination), destination != index else { return }
             let gift = value.gifts.remove(at: index)
             value.gifts.insert(gift, at: destination)
+            value.giftOrder = value.gifts.map { $0.identifier }
             moved = true
         }
         return moved
@@ -189,7 +190,7 @@ public extension VisualGramLocalAppearance {
 
     static func makeUpgradedGift(_ generic: StarGift.Gift, preview: StarGiftUpgradePreview, ownerId: EnginePeer.Id) -> StarGift.UniqueGift? {
         guard generic.upgradeStars != nil,
-              let model = preview.attributes.filter({ $0.attributeType == .model }).randomElement(),
+              let model = preview.attributes.filter({ if case let .model(_, _, _, crafted) = $0 { return !crafted }; return false }).randomElement(),
               let pattern = preview.attributes.filter({ $0.attributeType == .pattern }).randomElement(),
               let backdrop = preview.attributes.filter({ $0.attributeType == .backdrop }).randomElement() else { return nil }
         let total = max(1, generic.availability?.total ?? 100000)
@@ -255,6 +256,15 @@ public extension VisualGramLocalAppearance {
         func arrange(_ items: [ProfileGiftsContext.State.StarGift]) -> [ProfileGiftsContext.State.StarGift] {
             let pinned = items.filter { $0.pinnedToTop }
             let other = items.filter { !$0.pinnedToTop }
+            if let order = value.giftOrder, server.sorting == .date, collectionId == nil {
+                var ranks: [StarGiftReference: Int] = [:]
+                for (index, id) in order.enumerated() { if let gift = value.gifts.first(where: { $0.identifier == id }) { ranks[gift.reference(accountId: peerId)] = index } }
+                return pinned + other.enumerated().sorted { lhs, rhs in
+                    let a = lhs.element.reference.flatMap { ranks[$0] } ?? Int.max
+                    let b = rhs.element.reference.flatMap { ranks[$0] } ?? Int.max
+                    return a == b ? lhs.offset < rhs.offset : a < b
+                }.map { $0.element }
+            }
             return pinned + (server.sorting == .date && collectionId == nil ? other.sorted { $0.date > $1.date } : other)
         }
         result.gifts = arrange(result.gifts)

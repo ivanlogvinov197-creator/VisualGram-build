@@ -2,9 +2,9 @@ import Foundation
 import Postbox
 
 public extension VisualGramLocalAppearance {
-    func starsHistoryTransactions(accountId: EnginePeer.Id, mode: StarsTransactionsContext.Mode, peers: [Int64: EnginePeer]) -> [StarsContext.State.Transaction] {
+    func starsHistoryTransactions(accountId: EnginePeer.Id, mode: StarsTransactionsContext.Mode, peers: [Int64: EnginePeer], ton: Bool = false) -> [StarsContext.State.Transaction] {
         let value = self.appearance(accountId: accountId)
-        return (value.starsHistory ?? []).reversed().sorted { $0.date > $1.date }.filter { entry in
+        return ((ton ? value.gramHistory : value.starsHistory) ?? []).reversed().sorted { $0.date > $1.date }.filter { entry in
             switch mode {
             case .all: return true
             case .incoming: return entry.amount > 0
@@ -18,9 +18,9 @@ public extension VisualGramLocalAppearance {
             else if entry.gift != nil || entry.kind == .adjustment, let own = peers[accountId.toInt64()] { peer = .peer(own) }
             else { peer = .premiumBot }
             return StarsContext.State.Transaction(
-                flags: flags, id: "vg-stars:" + entry.id,
-                count: CurrencyAmount(amount: StarsAmount(value: entry.amount, nanos: 0), currency: .stars),
-                date: entry.date, peer: peer, title: entry.title ?? (entry.kind == .adjustment ? "Списание звёзд" : nil), description: nil, photo: nil,
+                flags: flags, id: (ton ? "vg-grams:" : "vg-stars:") + entry.id,
+                count: CurrencyAmount(amount: StarsAmount(value: entry.amount, nanos: 0), currency: ton ? .ton : .stars),
+                date: entry.date, peer: peer, title: entry.title ?? (entry.kind == .adjustment && entry.amount < 0 ? (ton ? "Списание GRAM" : "Списание звёзд") : nil), description: nil, photo: nil,
                 transactionDate: entry.date, transactionUrl: nil, paidMessageId: nil, giveawayMessageId: nil,
                 media: [], subscriptionPeriod: nil, starGift: entry.gift, floodskipNumber: nil,
                 starrefCommissionPermille: nil, starrefPeerId: nil, starrefAmount: nil, paidMessageCount: nil,

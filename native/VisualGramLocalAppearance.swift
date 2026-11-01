@@ -1,6 +1,16 @@
 import Foundation
 import SwiftSignalKit
 
+public enum VisualGramNameColor: Codable, Equatable {
+    case preset(Int32), collectible(PeerCollectibleColor)
+    public var peerColor: PeerColor {
+        switch self { case let .preset(value): return .preset(PeerNameColor(rawValue: value)); case let .collectible(value): return .collectible(value) }
+    }
+    public init(_ value: PeerColor) {
+        switch value { case let .preset(color): self = .preset(color.rawValue); case let .collectible(color): self = .collectible(color) }
+    }
+}
+
 public struct VisualGramUsername: Codable, Equatable {
     public var name: String
     public var purchaseDate: Int32
@@ -50,6 +60,9 @@ public struct VisualGramGift: Codable, Equatable {
     public var resaleStars: Int64?
     public var purchaseStars: Int64?
     public var purchaseBuyerId: Int64?
+    public var purchaseGrams: Int64?
+    public var isCrafted: Bool?
+    public var canCraftAt: Int32?
 
     public init(gift: StarGift, counterpartyId: Int64?, direction: Direction = .received, date: Int32, text: String) {
         self.gift = gift
@@ -64,6 +77,8 @@ public struct VisualGramGift: Codable, Equatable {
         if let localIdentifier { return localIdentifier }
         return "\(self.direction.rawValue):\(self.counterpartyId ?? 0):\(self.assetIdentifier)"
     }
+
+    public var craftChance: Int32? { if case let .unique(gift) = self.gift { return gift.craftChancePermille }; return nil }
 
     public var assetIdentifier: String {
         switch self.gift {
@@ -85,7 +100,7 @@ public struct VisualGramGift: Codable, Equatable {
         var attributes = gift.attributes.filter { $0.attributeType != .originalInfo }
         if self.hidesOriginalInfo != true { attributes.append(.originalInfo(senderPeerId: senderId, recipientPeerId: recipientId, date: self.date, text: self.text.isEmpty ? nil : self.text, entities: nil)) }
             let prices = self.resaleStars.map { [CurrencyAmount(amount: StarsAmount(value: $0, nanos: 0), currency: .stars)] }
-        return .unique(StarGift.UniqueGift(id: gift.id, giftId: gift.giftId, title: gift.title, number: gift.number, slug: gift.slug, owner: .peerId(recipientId), attributes: attributes, availability: gift.availability, giftAddress: nil, resellAmounts: prices, resellForTonOnly: false, releasedBy: gift.releasedBy, valueAmount: gift.valueAmount, valueCurrency: gift.valueCurrency, valueUsdAmount: gift.valueUsdAmount, flags: gift.flags, themePeerId: gift.themePeerId, peerColor: gift.peerColor, hostPeerId: nil, minOfferStars: nil, craftChancePermille: nil))
+        return .unique(StarGift.UniqueGift(id: gift.id, giftId: gift.giftId, title: gift.title, number: gift.number, slug: gift.slug, owner: .peerId(recipientId), attributes: attributes, availability: gift.availability, giftAddress: nil, resellAmounts: prices, resellForTonOnly: false, releasedBy: gift.releasedBy, valueAmount: gift.valueAmount, valueCurrency: gift.valueCurrency, valueUsdAmount: gift.valueUsdAmount, flags: gift.flags, themePeerId: gift.themePeerId, peerColor: gift.peerColor, hostPeerId: nil, minOfferStars: nil, craftChancePermille: gift.craftChancePermille))
     }
 
     public func profileGift(accountId: EnginePeer.Id, sender: EnginePeer?) -> ProfileGiftsContext.State.StarGift {
@@ -93,7 +108,7 @@ public struct VisualGramGift: Codable, Equatable {
         if case let .generic(gift) = self.gift { canUpgrade = gift.upgradeStars != nil && self.direction == .received && self.isHistoryOnly != true } else { canUpgrade = false }
         let transferStars: Int64?
         if case .unique = self.gift, self.direction == .received, self.isHistoryOnly != true { transferStars = VisualGramLocalAppearance.localGiftTransferStars } else { transferStars = nil }
-        return ProfileGiftsContext.State.StarGift(gift: self.displayGift(accountId: accountId), reference: self.reference(accountId: accountId), fromPeer: sender, date: self.date, text: self.text.isEmpty ? nil : self.text, entities: nil, nameHidden: false, savedToProfile: self.savedToProfile ?? true, pinnedToTop: self.pinnedToTop ?? false, convertStars: nil, canUpgrade: canUpgrade, canExportDate: nil, upgradeStars: nil, transferStars: transferStars, canTransferDate: nil, canResaleDate: nil, collectionIds: self.collectionIds, prepaidUpgradeHash: nil, upgradeSeparate: false, dropOriginalDetailsStars: nil, number: nil, isRefunded: false, canCraftAt: nil)
+        return ProfileGiftsContext.State.StarGift(gift: self.displayGift(accountId: accountId), reference: self.reference(accountId: accountId), fromPeer: sender, date: self.date, text: self.text.isEmpty ? nil : self.text, entities: nil, nameHidden: false, savedToProfile: self.savedToProfile ?? true, pinnedToTop: self.pinnedToTop ?? false, convertStars: nil, canUpgrade: canUpgrade, canExportDate: nil, upgradeStars: nil, transferStars: transferStars, canTransferDate: nil, canResaleDate: nil, collectionIds: self.collectionIds, prepaidUpgradeHash: nil, upgradeSeparate: false, dropOriginalDetailsStars: nil, number: nil, isRefunded: false, canCraftAt: self.canCraftAt ?? ((self.direction == .received && self.isHistoryOnly != true && (self.craftChance ?? 0) > 0) ? 0 : nil))
     }
 }
 
@@ -106,7 +121,22 @@ public struct VisualGramAppearance: Codable, Equatable {
     public var overridesEmojiStatus = false
     public var emojiStatus: PeerEmojiStatus?
     public var gifts: [VisualGramGift] = []
+    public var giftOrder: [String]?
     public var stars: Int64?
+    public var grams: Int64?
+    public var gramStarsPerUnit: Int64?
+    public var gramHistory: [VisualGramGift.StarsTransaction]?
+    public var gramCardGiftIds: [String]?
+    public var gramCardBackgroundId: String?
+    public var overridesProfileStyle: Bool?
+    public var profileColor: Int32?
+    public var profileBackgroundEmojiId: Int64?
+    public var nameColor: VisualGramNameColor?
+    public var nameBackgroundEmojiId: Int64?
+    public var overridesBusinessHours: Bool?
+    public var businessHours: TelegramBusinessHours?
+    public var overridesBusinessLocation: Bool?
+    public var businessLocation: TelegramBusinessLocation?
     public var giftPurchaseCounts: [String: Int32]?
     public var starsHistory: [VisualGramGift.StarsTransaction]?
     public var collections: [VisualGramGiftCollection]?
@@ -256,6 +286,12 @@ public final class VisualGramLocalAppearance {
         let added = appearance.usernames.filter { !existing.contains($0.name.lowercased()) }.map { TelegramPeerUsername(flags: [.isActive], username: $0.name) }
         user = user.withUpdatedUsernames(user.usernames + added)
         if user.addressName == nil, let first = added.first { user = user.withUpdatedUsername(first.username) }
+        if appearance.overridesProfileStyle == true {
+            if let color = appearance.nameColor { user = user.withUpdatedNameColor(color.peerColor) }
+            user = user.withUpdatedBackgroundEmojiId(appearance.nameBackgroundEmojiId)
+            user = user.withUpdatedProfileColor(appearance.profileColor.map { PeerNameColor(rawValue: $0) })
+            user = user.withUpdatedProfileBackgroundEmojiId(appearance.profileBackgroundEmojiId)
+        }
         if let verification = appearance.verification {
             user = TelegramUser(id: user.id, accessHash: user.accessHash, firstName: user.firstName, lastName: user.lastName, username: user.username, phone: user.phone, photo: user.photo, botInfo: user.botInfo, restrictionInfo: user.restrictionInfo, flags: user.flags, emojiStatus: user.emojiStatus, usernames: user.usernames, storiesHidden: user.storiesHidden, nameColor: user.nameColor, backgroundEmojiId: user.backgroundEmojiId, profileColor: user.profileColor, profileBackgroundEmojiId: user.profileBackgroundEmojiId, subscriberCount: user.subscriberCount, verificationIconFileId: verification.iconFileId, linkedCommunityId: user.linkedCommunityId)
         }
