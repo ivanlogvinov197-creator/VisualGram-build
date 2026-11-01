@@ -18,8 +18,8 @@ def source():
 
 
 CHECKS = r'''
-func nft(_ id: Int64, chance: Int32? = 500, type: Int64 = 42) -> StarGift.UniqueGift {
-    .init(id: id, giftId: type, title: "Gift", number: Int32(id), slug: "Gift-\(id)", owner: .peerId(.init(10)), attributes: [.model(1), .pattern(2), .backdrop(3)], availability: .init(issued: 1, total: 1000), giftAddress: nil, resellAmounts: [CurrencyAmount(amount: .init(value: 100, nanos: 0), currency: .stars)], resellForTonOnly: false, releasedBy: nil, valueAmount: nil, valueCurrency: nil, valueUsdAmount: nil, flags: [], themePeerId: nil, peerColor: nil, hostPeerId: nil, minOfferStars: nil, craftChancePermille: chance)
+func nft(_ id: Int64, chance: Int32? = 500, type: Int64 = 42, ownerId: EnginePeer.Id = .init(10)) -> StarGift.UniqueGift {
+    .init(id: id, giftId: type, title: "Gift", number: Int32(id), slug: "Gift-\(id)", owner: .peerId(ownerId), attributes: [.model(1), .pattern(2), .backdrop(3)], availability: .init(issued: 1, total: 1000), giftAddress: nil, resellAmounts: [CurrencyAmount(amount: .init(value: 100, nanos: 0), currency: .stars)], resellForTonOnly: false, releasedBy: nil, valueAmount: nil, valueCurrency: nil, valueUsdAmount: nil, flags: [], themePeerId: nil, peerColor: nil, hostPeerId: nil, minOfferStars: nil, craftChancePermille: chance)
 }
 let a = EnginePeer.Id(10), b = EnginePeer.Id(20)
 let store = VisualGramLocalAppearance()
@@ -75,6 +75,21 @@ assert(store.appearance(accountId: a).grams == 10_000_000_000)
 let data = try JSONEncoder().encode(store.values)
 store.values = try JSONDecoder().decode([String: VisualGramAppearance].self, from: data)
 assert(store.appearance(accountId: a).grams == 10_000_000_000 && store.appearance(accountId: a).gifts.last?.purchaseGrams == 1_250_000_000)
+store.beforeUpdate = { store.values["10"]?.gramStarsPerUnit = 40 }
+assert(store.buyLocalGiftWithGrams(accountId: a, recipientPeerId: a, gift: nft(9), price: 1_250_000_000, requireListing: false, now: 203) == .priceChanged)
+assert(store.appearance(accountId: a).grams == 10_000_000_000 && store.appearance(accountId: a).gramHistory?.count == 1, "stale quote changed the balance or history")
+let gramMarket = VisualGramLocalAppearance(), c = EnginePeer.Id(30)
+gramMarket.values["10"] = .init(enabled: true, gifts: [], stars: 100)
+gramMarket.values["10"]?.grams = 2_500_000_000; gramMarket.values["10"]?.gramStarsPerUnit = 80
+for sellerId in [b, c] {
+    var listed = VisualGramGift(gift: .unique(nft(25, ownerId: sellerId)), counterpartyId: nil, date: 100, text: "")
+    listed.resaleStars = 100
+    gramMarket.values[String(sellerId.toInt64())] = .init(enabled: true, gifts: [listed], stars: 0)
+    gramMarket.values[String(sellerId.toInt64())]?.grams = 0
+}
+assert(gramMarket.buyLocalGiftWithGrams(accountId: a, recipientPeerId: a, gift: nft(25, ownerId: c), price: 1_250_000_000, requireListing: true, now: 400) == .success)
+assert(gramMarket.appearance(accountId: a).grams == 1_250_000_000 && gramMarket.appearance(accountId: b).grams == 0 && gramMarket.appearance(accountId: c).grams == 1_250_000_000)
+assert(gramMarket.appearance(accountId: a).stars == 100)
 print("PASS: GRAM precision/overflow, conversion, debit/history, duplicate/insufficient balance, persistence; craft success/failure/consumption, retained history, unlock date, owner and replay guards")
 '''
 

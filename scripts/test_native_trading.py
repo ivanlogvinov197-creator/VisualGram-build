@@ -14,9 +14,10 @@ def source():
     imports = management[management.index('    func addGift('):management.index('    func scheduleGift(')]
     upgraded = management[management.index('    static func makeUpgradedGift('):management.index('    @discardableResult\n    func updateGift(')]
     visibility = management[management.index('    func profileState('):management.index('    func collection(')]
+    removals = management[management.index('    func removeLocalGifts('):management.index('    func reorderGifts(')]
     trading = (root / 'native/VisualGramGiftTrading.swift').read_text(encoding='utf-8')
     trading = trading[:trading.index('    func localMarketState(')] + '}\n'
-    return STUBS + model + STORE + reference + imports + upgraded + visibility + '}\n' + trading + CHECKS + PURCHASE_CHECKS
+    return STUBS + model + STORE + reference + imports + upgraded + removals + visibility + '}\n' + trading + CHECKS + PURCHASE_CHECKS + REMOVAL_CHECKS + SELLER_CHECKS
 
 
 STORE = r'''
@@ -29,6 +30,8 @@ public struct VisualGramAppearance: Codable {
     var premium = false
     var gifts: [VisualGramGift] = []
     var giftOrder: [String]?
+    var gramCardGiftIds: [String]?
+    var gramCardBackgroundId: String?
     var stars: Int64?
     var giftPurchaseCounts: [String: Int32]?
     var starsHistory: [VisualGramGift.StarsTransaction]?
@@ -37,16 +40,17 @@ public struct VisualGramAppearance: Codable {
 }
 public final class VisualGramLocalAppearance {
     var values: [String: VisualGramAppearance] = [:]
+    var beforeUpdate: (() -> Void)?
     func snapshotValues() -> [String: VisualGramAppearance] { values }
-    func updateValues(_ change: (inout [String: VisualGramAppearance]) -> Void) { change(&values) }
+    func updateValues(_ change: (inout [String: VisualGramAppearance]) -> Void) { let hook = beforeUpdate; beforeUpdate = nil; hook?(); change(&values) }
     func appearance(accountId: EnginePeer.Id, targetPeerId: EnginePeer.Id? = nil) -> VisualGramAppearance { values[String((targetPeerId ?? accountId).toInt64())] ?? VisualGramAppearance() }
     func update(accountId: EnginePeer.Id, targetPeerId: EnginePeer.Id? = nil, _ change: (inout VisualGramAppearance) -> Void) { let key = String((targetPeerId ?? accountId).toInt64()); var value = values[key] ?? VisualGramAppearance(); change(&value); values[key] = value }
 '''
 
 
 CHECKS = r'''
-func unique(_ id: Int64, _ slug: String) -> StarGift.UniqueGift {
-    .init(id: id, giftId: 42, title: "Test", number: 1, slug: slug, owner: .peerId(.init(10)), attributes: [.model(1), .pattern(2), .backdrop(3)], availability: .init(issued: 1, total: 500), giftAddress: nil, resellAmounts: nil, resellForTonOnly: false, releasedBy: nil, valueAmount: nil, valueCurrency: nil, valueUsdAmount: nil, flags: [], themePeerId: nil, peerColor: nil, hostPeerId: nil, minOfferStars: nil, craftChancePermille: nil)
+func unique(_ id: Int64, _ slug: String, ownerId: EnginePeer.Id = .init(10)) -> StarGift.UniqueGift {
+    .init(id: id, giftId: 42, title: "Test", number: 1, slug: slug, owner: .peerId(ownerId), attributes: [.model(1), .pattern(2), .backdrop(3)], availability: .init(issued: 1, total: 500), giftAddress: nil, resellAmounts: nil, resellForTonOnly: false, releasedBy: nil, valueAmount: nil, valueCurrency: nil, valueUsdAmount: nil, flags: [], themePeerId: nil, peerColor: nil, hostPeerId: nil, minOfferStars: nil, craftChancePermille: nil)
 }
 let a = EnginePeer.Id(10), b = EnginePeer.Id(20), c = EnginePeer.Id(30)
 let store = VisualGramLocalAppearance()
@@ -172,6 +176,43 @@ assert(feeTest.transferLocalGift(accountId: a, reference: feeGiftReference, reci
 assert(feeTest.appearance(accountId: a).stars == 0 && feeTest.appearance(accountId: a).starsHistory?.last?.amount == -25)
 assert(purchases.appearance(accountId: b).gifts[0].identifier == order[1])
 print("PASS: ordinary purchases, duplicate copies, sold-out/auction/date/limit gates, prepaid upgrade, purchase chat metadata, atomic debits, hidden profiles, batch links, reorder and restart")
+'''
+
+
+REMOVAL_CHECKS = r'''
+let cleanup = VisualGramLocalAppearance()
+let worn = VisualGramGift(gift: .unique(unique(101, "Test-101")), counterpartyId: 20, date: 100, text: "")
+let keep = VisualGramGift(gift: .unique(unique(102, "Test-102")), counterpartyId: 20, date: 100, text: "")
+var oldHistory = worn
+oldHistory.localIdentifier = "history-only-copy"
+oldHistory.isHistoryOnly = true
+cleanup.values["10"] = .init(enabled: true, gifts: [oldHistory, worn, keep], giftOrder: [worn.identifier, keep.identifier], gramCardGiftIds: [worn.identifier, keep.identifier], gramCardBackgroundId: worn.identifier, overridesEmojiStatus: true, emojiStatus: .init(content: .starGift(101, 1, "Test", "Test-101", 2, 0, 0, 0, 0)))
+cleanup.values["20"] = .init(enabled: true, gifts: [keep])
+cleanup.removeLocalGifts(accountId: a, identifiers: [oldHistory.identifier])
+assert(cleanup.appearance(accountId: a).emojiStatus != nil, "deleting a history row removed the active NFT status")
+cleanup.removeLocalGifts(accountId: a, identifiers: [worn.identifier])
+let cleaned = cleanup.appearance(accountId: a)
+assert(cleaned.emojiStatus == nil && cleaned.overridesEmojiStatus)
+assert(cleaned.gifts.map { $0.identifier } == [keep.identifier])
+assert(cleaned.giftOrder == [keep.identifier] && cleaned.gramCardGiftIds == [keep.identifier] && cleaned.gramCardBackgroundId == nil)
+assert(cleanup.appearance(accountId: b).gifts.count == 1, "deletion leaked into another profile")
+print("PASS: gift deletion clears worn status, card decorations and order; deleting history preserves an active status")
+'''
+
+SELLER_CHECKS = r'''
+let overlap = VisualGramLocalAppearance()
+var copyB = VisualGramGift(gift: .unique(unique(203, "Test-203", ownerId: b)), counterpartyId: nil, date: 100, text: "")
+var copyC = VisualGramGift(gift: .unique(unique(203, "Test-203", ownerId: c)), counterpartyId: nil, date: 100, text: "")
+copyB.resaleStars = 40; copyC.resaleStars = 60
+overlap.values["10"] = .init(enabled: true, gifts: [], stars: 100)
+overlap.values["20"] = .init(enabled: true, gifts: [copyB], stars: 5)
+overlap.values["30"] = .init(enabled: true, gifts: [copyC], stars: 5)
+assert(overlap.buyLocalGift(accountId: a, recipientPeerId: a, gift: unique(203, "Test-203"), price: 60, requireListing: true, now: 300) == .unavailable, "ambiguous seller was picked by dictionary order")
+assert(overlap.appearance(accountId: a).stars == 100)
+assert(overlap.buyLocalGift(accountId: a, recipientPeerId: a, gift: unique(203, "Test-203", ownerId: c), price: 60, requireListing: true, now: 301) == .success)
+assert(overlap.appearance(accountId: a).stars == 40 && overlap.appearance(accountId: b).stars == 5 && overlap.appearance(accountId: c).stars == 65)
+assert(overlap.appearance(accountId: b).gifts.contains { $0.isHistoryOnly != true }, "purchase consumed another profile's visual copy")
+print("PASS: overlapping visual NFT copies select the displayed seller and never a random profile")
 '''
 
 
