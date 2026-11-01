@@ -15,7 +15,13 @@ def apply(root, project):
     shutil.copyfile(project / "native/VisualGramGiftManagement.swift", core / "VisualGramGiftManagement.swift")
     shutil.copyfile(project / "native/VisualGramGiftTrading.swift", core / "VisualGramGiftTrading.swift")
     shutil.copyfile(project / "native/VisualGramAppearanceController.swift", peer / "Sources/VisualGramAppearanceController.swift")
-    shutil.copyfile(project / "native/VisualGramChatGifts.swift", root / "submodules/TelegramUI/Sources/VisualGramChatGifts.swift")
+    # Synthetic messages belong to the existing history renderer, which already
+    # owns the legacy Postbox boundary. Do not create a new Postbox consumer.
+    history_renderer = root / "submodules/TelegramUI/Sources/ChatHistoryEntriesForView.swift"
+    helper = (project / "native/VisualGramChatGifts.swift").read_text(encoding="utf-8")
+    helper = "\n".join(line for line in helper.splitlines() if not line.startswith("import "))
+    with history_renderer.open("a", encoding="utf-8", newline="\n") as output:
+        output.write("\n" + helper + "\n")
     shutil.copyfile(project / "native/VisualGramGiftDelivery.swift", root / "submodules/TelegramUI/Sources/VisualGramGiftDelivery.swift")
     account_context = root / "submodules/TelegramUI/Sources/AccountContext.swift"
     replace(account_context, '    private var experimentalUISettingsDisposable: Disposable?\n', '    private var experimentalUISettingsDisposable: Disposable?\n    private var visualGramGiftDelivery: VisualGramGiftDelivery?\n')
