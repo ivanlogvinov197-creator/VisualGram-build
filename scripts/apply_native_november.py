@@ -187,5 +187,9 @@ def apply_november(root, project):
     replace(market, '            let tonBalance = tonContext.currentState?.balance.value ?? 0\n            if tonBalance == 0 {', '            let wallet = VisualGramLocalAppearance.shared.appearance(accountId: component.context.account.peerId)\n            let tonBalance = (wallet.enabled ? wallet.grams : nil) ?? tonContext.currentState?.balance.value ?? 0\n            if tonBalance == 0 && !(wallet.enabled && wallet.grams != nil) {')
     replace(market, '                let tonBalance = tonState?.balance.value ?? 0\n', '                let wallet = VisualGramLocalAppearance.shared.appearance(accountId: component.context.account.peerId)\n                let tonBalance = (wallet.enabled ? wallet.grams : nil) ?? tonState?.balance.value ?? 0\n')
 
-    replace(market, 'guard let component = self.component, let starsContext = component.context.starsContext, let tonContext = component.context.tonContext, let controller = self.environment?.controller() else {', 'guard let component = self.component, let controller = self.environment?.controller() else { return }\n            let starsContext = component.context.starsContext ?? component.context.engine.payments.peerStarsContext()\n            let tonContext = component.context.tonContext ?? component.context.engine.payments.peerTonContext()\n            do {')
+    replace(market, '''guard let component = self.component, let starsContext = component.context.starsContext, let tonContext = component.context.tonContext, let controller = self.environment?.controller() else {
+                return
+            }''', '''guard let component = self.component, let controller = self.environment?.controller() else { return }
+            let starsContext = component.context.starsContext ?? component.context.engine.payments.peerStarsContext()
+            let tonContext = component.context.tonContext ?? component.context.engine.payments.peerTonContext()''')
     replace(screen, '                            actionIsEnabled: true,\n', '                            actionIsEnabled: !showLocalGrams,\n')
