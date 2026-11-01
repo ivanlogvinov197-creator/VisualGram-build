@@ -23,7 +23,12 @@ def source():
 STUBS = r'''
 import Foundation
 public typealias VisualGramUsername = Int
-public typealias PeerVerification = Int
+public struct PeerVerification: Codable, Equatable {
+    public let botId: Int64
+    public let iconFileId: Int64
+    public let description: String
+    public let descriptionEntities: [Int]
+}
 public typealias PeerEmojiStatus = Int
 public typealias TelegramStarRating = Int
 public typealias VisualGramNameColor = Int
@@ -77,6 +82,22 @@ let migrated = try JSONDecoder().decode(VisualGramAppearance.self, from: oldData
 assert(migrated.enabled && migrated.scheduledGifts == nil)
 let migratedJson = String(data: try JSONEncoder().encode(migrated), encoding: .utf8)!
 assert(!migratedJson.contains("controlBot"), "obsolete bot connection persisted")
+var legacyProfile = try JSONSerialization.jsonObject(with: oldData) as! [String: Any]
+legacyProfile["stars"] = 123456
+legacyProfile["verification"] = ["botId": Int64(42), "iconFileId": Int64(999), "description": "Major"]
+legacyProfile["majorTemplate"] = legacyProfile["verification"]
+var legacyNested = legacyProfile
+legacyNested["stars"] = 789
+legacyProfile["peerOverrides"] = ["20": legacyNested]
+let legacyVerificationData = try JSONSerialization.data(withJSONObject: ["10": legacyProfile])
+assert((try? JSONDecoder().decode([String: VisualGramAppearance].self, from: legacyVerificationData)) == nil, "fixture must require compatibility migration")
+let compatibleProfiles = VisualGramLocalAppearance.decodeStoredAppearances(legacyVerificationData)!
+assert(compatibleProfiles["10"]?.stars == 123456 && compatibleProfiles["10"]?.verification?.description == "Major", "older verification discarded the profile")
+assert(compatibleProfiles["10"]?.majorTemplate?.descriptionEntities == [], "older Major template not migrated")
+assert(compatibleProfiles["10"]?.peerOverrides?["20"]?.stars == 789 && compatibleProfiles["10"]?.peerOverrides?["20"]?.verification?.descriptionEntities == [], "nested v2 verification lost")
+let compatibleData = try JSONEncoder().encode(compatibleProfiles)
+assert(VisualGramLocalAppearance.decodeStoredAppearances(compatibleData) == compatibleProfiles, "current profiles changed on reload")
+assert(VisualGramLocalAppearance.decodeStoredAppearances(Data("invalid".utf8)) == nil, "malformed data accepted")
 reopened.update(accountId: own) { $0.enabled = true; $0.verified = true; $0.premium = true; $0.stars = 999 }
 assert(reopened.appearance(accountId: secondAccount, targetPeerId: own) == reopened.appearance(accountId: own), "profile differs between accounts")
 assert(!reopened.appearance(accountId: secondAccount).verified, "another identity inherited own badge")
