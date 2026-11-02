@@ -11,7 +11,7 @@ import WalletContext
 import WalletCardComponent
 import WalletGiftStickerMediaComponent
 
-private final class VisualGramGiftCell: UICollectionViewCell {
+final class VisualGramGiftCell: UICollectionViewCell {
     private let component = ComponentView<Empty>()
     private var parameters: (AccountContext, VisualGramGift, EnginePeer.Id, Bool, Bool)?
     private var renderedSize = CGSize.zero

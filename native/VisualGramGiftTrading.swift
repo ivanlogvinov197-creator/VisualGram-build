@@ -98,7 +98,8 @@ public extension VisualGramLocalAppearance {
         return nil
     }
 
-    func buyLocalGift(accountId: EnginePeer.Id, recipientPeerId: EnginePeer.Id, gift: StarGift.UniqueGift, price: Int64, requireListing: Bool, now: Int32) -> VisualGramGiftPurchaseResult {
+    func buyLocalGift(accountId: EnginePeer.Id, recipientPeerId: EnginePeer.Id, gift: StarGift.UniqueGift, price: Int64, requireListing: Bool, now: Int32, text: String = "", nameHidden: Bool = false, entities: [MessageTextEntity]? = nil) -> VisualGramGiftPurchaseResult {
+        guard !gift.resellForTonOnly else { return .unavailable }
         guard price > 0, price <= Int64(Int32.max) else { return .invalid }
         var result: VisualGramGiftPurchaseResult = .unavailable
         self.updateValues { values in
@@ -144,6 +145,7 @@ public extension VisualGramLocalAppearance {
                     values[buyerKey]?.gifts.append(outgoing)
                 }
             }
+            Self.applyPurchaseMessage(values: &values, slug: gift.slug, buyerId: accountId, now: now, text: text, nameHidden: nameHidden, entities: entities)
             result = .success
         }
         return result
@@ -251,6 +253,16 @@ public extension VisualGramLocalAppearance {
             purchase.counterpartyId = recipientId.toInt64()
             purchase.isHistoryOnly = true
             values[String(buyerId.toInt64())]?.gifts.append(purchase)
+        }
+    }
+
+    internal static func applyPurchaseMessage(values: inout [String: VisualGramAppearance], slug: String, buyerId: EnginePeer.Id, now: Int32, text: String, nameHidden: Bool, entities: [MessageTextEntity]?) {
+        for key in Array(values.keys) {
+            guard var value = values[key] else { continue }
+            for index in value.gifts.indices where value.gifts[index].assetIdentifier == "unique:" + slug && value.gifts[index].purchaseBuyerId == buyerId.toInt64() && value.gifts[index].date == now {
+                value.gifts[index].text = text; value.gifts[index].nameHidden = nameHidden; value.gifts[index].textEntities = entities
+            }
+            values[key] = value
         }
     }
 

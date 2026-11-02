@@ -30,7 +30,8 @@ private struct VisualGramAppearanceEntry: ItemListNodeEntry {
     }
 
     static func <(lhs: Self, rhs: Self) -> Bool {
-        return lhs.section == rhs.section ? lhs.stableId < rhs.stableId : lhs.section < rhs.section
+        func rank(_ id: Int32) -> Int32 { switch id { case 24: return 18; case 23: return 21; case 27: return 25; default: return id } }
+        return lhs.section == rhs.section ? rank(lhs.stableId) < rank(rhs.stableId) : lhs.section < rhs.section
     }
 
     func item(presentationData: ItemListPresentationData, arguments: Any) -> ListViewItem {
@@ -148,9 +149,11 @@ private final class VisualGramAppearanceActions {
         case 10: self.editUsername(index: nil)
         case 11: self.editPhone()
         case 12: self.editRating()
-        case 13: self.toggleList(1)
-        case 26: self.toggleList(2)
-        case 20: self.configureReceipt { [weak self] in self?.selectOrdinaryGift() }
+        case 13: self.openUsernames()
+        case 26: self.openGiftList(history: true)
+        case 20:
+            self.direction = .received; self.counterpartyId = nil; self.giftDate = Int32(clamping: Int64(Date().timeIntervalSince1970)); self.giftText = ""
+            self.selectOrdinaryGift()
         case 21: self.configureReceipt { [weak self] in self?.importUniqueGift() }
         case 22: self.configureReceipt(direction: .sent) { [weak self] in self?.selectOrdinaryGift() }
         case 23: self.configureReceipt(direction: .sent) { [weak self] in self?.importUniqueGift() }
@@ -166,8 +169,7 @@ private final class VisualGramAppearanceActions {
             self.controller?.push(BusinessHoursSetupScreen(context: self.context, initialValue: self.appearance.businessHours, completion: { _ in }, visualGramTarget: self.targetPeerId))
         case 16:
             self.controller?.push(BusinessLocationSetupScreen(context: self.context, initialValue: self.appearance.businessLocation, completion: { _ in }, visualGramTarget: self.targetPeerId))
-        case 27: self.openGrid()
-        case 28: self.openCrafts()
+        case 27: self.openGiftList(history: false)
         case 903: self.activeSection.set(-1)
         case 32:
             self.form(title: "Баланс GRAM", fields: [("GRAM", self.appearance.grams.map { VisualGramLocalAppearance.formatGrams($0) } ?? "")]) { [weak self] values in
@@ -220,55 +222,78 @@ private final class VisualGramAppearanceActions {
         }
     }
 
-    private func editUsername(index: Int?) {
-        let item = index.flatMap { self.appearance.usernames.indices.contains($0) ? self.appearance.usernames[$0] : nil }
-        let date = self.dateFormatter.string(from: Date(timeIntervalSince1970: TimeInterval(item?.purchaseDate ?? Int32(Date().timeIntervalSince1970))))
-        self.form(title: "NFT-юзернейм", fields: [("Юзернейм без @ (пусто — удалить)", item?.name ?? ""), ("Дата: yyyy-MM-dd HH:mm", date), ("Цена TON", item.map { String(Double($0.tonAmount) / 1_000_000_000) } ?? "100"), ("Стоимость USD", item.map { String(Double($0.usdAmount) / 100) } ?? "250")]) { [weak self] values in
-            guard let self, values.count == 4 else { return }
-            let name = values[0].trimmingCharacters(in: CharacterSet(charactersIn: "@"))
-            if name.isEmpty, let index {
-                self.update { if $0.usernames.indices.contains(index) { $0.usernames.remove(at: index) } }
-                return
-            }
-            guard name.range(of: "^[A-Za-z][A-Za-z0-9_]{3,31}$", options: .regularExpression) != nil, let date = self.dateFormatter.date(from: values[1]), date.timeIntervalSince1970 >= 0, date.timeIntervalSince1970 <= Double(Int32.max), let ton = self.minorAmount(values[2], scale: 1_000_000_000), let usd = self.minorAmount(values[3], scale: 100) else {
-                self.message("Проверь юзернейм, дату и неотрицательные цены."); return
-            }
-            let username = VisualGramUsername(name: name, purchaseDate: Int32(date.timeIntervalSince1970), tonAmount: ton, usdAmount: usd)
-            self.update {
-                $0.enabled = true
-                if let index, $0.usernames.indices.contains(index) { $0.usernames[index] = username }
-                else if !$0.usernames.contains(where: { $0.name.lowercased() == name.lowercased() }) { $0.usernames.append(username) }
-            }
+    private func usdAmount(ton: Int64) -> Int64? {
+        guard let rate = self.context.currentAppConfiguration.with({ $0 }).data?["ton_usd_rate"] as? Double, rate.isFinite, rate > 0 else { return nil }
+        var amount = Decimal(ton) / 1_000_000_000 * Decimal(rate) * 100
+        var rounded = Decimal(); NSDecimalRound(&rounded, &amount, 0, .plain)
+        guard rounded >= 0, rounded <= Decimal(Int64.max) else { return nil }
+        return NSDecimalNumber(decimal: rounded).int64Value
+    }
+
+    private func resolvePerson(_ input: String, completion: @escaping (EnginePeer?) -> Void) {
+        let value = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let raw = Int64(value), raw > 0 {
+            self.disposables.add((self.context.engine.data.get(TelegramEngine.EngineData.Item.Peer.Peer(id: EnginePeer.Id(raw))) |> deliverOnMainQueue).start(next: { peer in
+                if let peer, case .user = peer { completion(peer) } else { completion(nil) }
+            }))
+        } else {
+            let name = value.trimmingCharacters(in: CharacterSet(charactersIn: "@"))
+            self.disposables.add((self.context.engine.peers.resolvePeerByName(name: name, referrer: nil) |> deliverOnMainQueue).start(next: { result in
+                guard case let .result(peer) = result else { return }
+                if let peer, case .user = peer { completion(peer) } else { completion(nil) }
+            }))
         }
     }
 
+    private func editUsername(index: Int?) {
+        let item = index.flatMap { self.appearance.usernames.indices.contains($0) ? self.appearance.usernames[$0] : nil }
+        let originalName = item?.name
+        self.controller?.push(VisualGramDetailsController(context: self.context, title: "NFT-юзернейм", fields: [("Юзернейм без @", item?.name ?? ""), ("Цена TON", item.map { VisualGramLocalAppearance.formatGrams($0.tonAmount) } ?? "")], date: item?.purchaseDate ?? Int32(clamping: Int64(Date().timeIntervalSince1970)), tonIndex: 1, save: { [weak self] texts, date in
+            guard let self, texts.count == 2 else { return false }
+            let name = texts[0].trimmingCharacters(in: CharacterSet(charactersIn: "@ "))
+            guard name.range(of: "^[A-Za-z][A-Za-z0-9_]{3,31}$", options: .regularExpression) != nil, let ton = VisualGramLocalAppearance.parseGrams(texts[1]), let usd = self.usdAmount(ton: ton) else { self.message("Проверь юзернейм и цену. Для расчёта USDT нужен загруженный курс TON."); return false }
+            guard !self.appearance.usernames.contains(where: { $0.name.lowercased() == name.lowercased() && $0.name.lowercased() != originalName?.lowercased() }) else { self.message("Этот юзернейм уже добавлен."); return false }
+            if let originalName, !self.appearance.usernames.contains(where: { $0.name == originalName }) { self.message("Этот юзернейм уже удалён."); return false }
+            let username = VisualGramUsername(name: name, purchaseDate: date, tonAmount: ton, usdAmount: usd)
+            self.update { value in
+                value.enabled = true
+                if let originalName, let position = value.usernames.firstIndex(where: { $0.name == originalName }) { value.usernames[position] = username }
+                else { value.usernames.append(username) }
+            }
+            return true
+        }))
+    }
+
     private func selectTarget() {
-        self.form(title: "Чей профиль оформить", fields: [("@юзернейм (пусто — мой профиль)", self.targetPeerId == self.context.account.peerId ? "" : self.targetTitle)]) { [weak self] values in
-            guard let self, let input = values.first else { return }
+        self.form(title: "Чей профиль оформить", fields: [("@юзернейм или ID (пусто — мой профиль)", self.targetPeerId == self.context.account.peerId ? "" : String(self.targetPeerId.toInt64()))]) { [weak self] texts in
+            guard let self, let input = texts.first else { return }
             if input.isEmpty {
                 self.targetPeerId = self.context.account.peerId; self.targetTitle = "Мой профиль"
-                VisualGramLocalAppearance.shared.update(accountId: self.context.account.peerId) { _ in }
-                return
+                VisualGramLocalAppearance.shared.update(accountId: self.context.account.peerId) { _ in }; return
             }
-            let name = input.trimmingCharacters(in: CharacterSet(charactersIn: "@"))
-            self.disposables.add((self.context.engine.peers.resolvePeerByName(name: name, referrer: nil) |> deliverOnMainQueue).start(next: { [weak self] result in
-                guard let self, case let .result(peer) = result else { return }
-                guard let peer, case .user = peer else { self.message("Пользователь не найден."); return }
-                self.targetPeerId = peer.id; self.targetTitle = "@\(name)"
+            self.resolvePerson(input) { [weak self] peer in
+                guard let self, let peer else { self?.message("Профиль не найден. Для неизвестного ID сначала открой чат с человеком или укажи @юзернейм."); return }
+                self.targetPeerId = peer.id; self.targetTitle = peer.compactDisplayTitle
                 VisualGramLocalAppearance.shared.update(accountId: self.context.account.peerId) { _ in }
-            }))
+            }
         }
     }
 
     private func editPhone() {
         let item = self.appearance.phoneNumber
-        self.form(title: "Визуальный номер профиля", fields: [("Номер: +7… или +888… (пусто — убрать)", item.map { "+\($0.name)" } ?? ""), ("Дата: yyyy-MM-dd HH:mm", self.dateFormatter.string(from: Date(timeIntervalSince1970: TimeInterval(item?.purchaseDate ?? Int32(Date().timeIntervalSince1970))))), ("Цена TON (для +888)", item.map { String(Double($0.tonAmount) / 1_000_000_000) } ?? "100"), ("Цена USD (для +888)", item.map { String(Double($0.usdAmount) / 100) } ?? "250")]) { [weak self] values in
-            guard let self, values.count == 4 else { return }
-            if values[0].isEmpty { self.update { $0.phoneNumber = nil }; return }
-            let number = values[0].filter { $0.isNumber }
-            guard number.range(of: "^[0-9]{5,15}$", options: .regularExpression) != nil, let date = self.dateFormatter.date(from: values[1]), date.timeIntervalSince1970 >= 0, date.timeIntervalSince1970 <= Double(Int32.max), let ton = self.minorAmount(values[2], scale: 1_000_000_000), let usd = self.minorAmount(values[3], scale: 100) else { self.message("Проверь номер, дату и цены."); return }
-            self.update { $0.enabled = true; $0.phoneNumber = VisualGramUsername(name: number, purchaseDate: Int32(date.timeIntervalSince1970), tonAmount: ton, usdAmount: usd) }
-        }
+        self.controller?.push(VisualGramDetailsController(context: self.context, title: "Номер профиля", fields: [("Номер: +7… или +888…", item.map { "+" + $0.name } ?? ""), ("Цена TON", item.map { VisualGramLocalAppearance.formatGrams($0.tonAmount) } ?? "")], date: item?.purchaseDate ?? Int32(clamping: Int64(Date().timeIntervalSince1970)), tonIndex: 1, phoneMode: true, save: { [weak self] texts, date in
+            guard let self, texts.count == 2 else { return false }
+            if texts[0].isEmpty { self.update { $0.phoneNumber = nil }; return true }
+            let number = texts[0].filter { $0.isNumber }
+            guard number.range(of: "^[0-9]{5,15}$", options: .regularExpression) != nil else { self.message("Проверь номер."); return false }
+            var ton: Int64 = 0, usd: Int64 = 0
+            if number.hasPrefix("888") {
+                guard let price = VisualGramLocalAppearance.parseGrams(texts[1]), let dollar = self.usdAmount(ton: price) else { self.message("Проверь цену и подключение для загрузки курса TON."); return false }
+                ton = price; usd = dollar
+            }
+            self.update { $0.enabled = true; $0.phoneNumber = VisualGramUsername(name: number, purchaseDate: date, tonAmount: ton, usdAmount: usd) }
+            return true
+        }))
     }
 
     private func editRating() {
@@ -284,31 +309,31 @@ private final class VisualGramAppearanceActions {
     }
 
     private func configureVerification(forceSetup: Bool = false) {
-        if !forceSetup, let template = VisualGramLocalAppearance.shared.appearance(accountId: self.context.account.peerId).majorTemplate {
-            self.update { $0.enabled = true; $0.verification = template }
-            return
-        }
-        self.form(title: "Значок Major", fields: [("Бот-верификатор или пользователь со значком", "major")]) { [weak self] values in
-            guard let self, let input = values.first else { return }
-            let name = input.trimmingCharacters(in: CharacterSet(charactersIn: "@"))
-            if name.isEmpty { self.update { $0.verification = nil }; return }
-            self.disposables.add((self.context.engine.peers.resolvePeerByName(name: name, referrer: nil)
-            |> deliverOnMainQueue).start(next: { [weak self] result in
-                guard let self, case let .result(peer) = result else { return }
-                guard let peer else { self.message("Бот не найден."); return }
-                self.disposables.add((self.context.engine.peers.fetchAndUpdateCachedPeerData(peerId: peer.id)
-                |> mapToSignal { _ in self.context.engine.data.get(TelegramEngine.EngineData.Item.Peer.CachedData(id: peer.id)) }
-                |> deliverOnMainQueue).start(next: { [weak self] cached in
-                    guard let self else { return }
-                    let template: PeerVerification
-                    if let verification = (cached as? CachedUserData)?.verification { template = verification }
-                    else if let settings = (cached as? CachedUserData)?.botInfo?.verifierSettings { template = PeerVerification(botId: peer.id, iconFileId: settings.iconFileId, description: settings.customDescription ?? settings.companyName, descriptionEntities: settings.customDescriptionEntities ?? []) }
-                    else { self.message("На этом профиле нет значка. Укажи @юзернейм человека с верификацией Major или её официального бота. После первого выбора значок включается одним переключателем."); return }
-                    VisualGramLocalAppearance.shared.update(accountId: self.context.account.peerId) { $0.majorTemplate = template }
-                    self.update { $0.enabled = true; $0.verification = template }
-                }))
+        let target = self.targetPeerId
+        let alert = UIAlertController(title: "Верификация", message: nil, preferredStyle: .alert)
+        for (title, source) in [("Major", "starsov"), ("Hold", "hold")] {
+            alert.addAction(UIAlertAction(title: title, style: .default, handler: { [weak self] _ in
+                guard let self else { return }
+                self.resolvePerson(source) { [weak self] peer in
+                    guard let self, let peer else { self?.message("Не удалось загрузить @" + source); return }
+                    self.disposables.add((self.context.engine.peers.fetchAndUpdateCachedPeerData(peerId: peer.id)
+                    |> mapToSignal { _ in self.context.engine.data.get(TelegramEngine.EngineData.Item.Peer.CachedData(id: peer.id)) }
+                    |> deliverOnMainQueue).start(next: { [weak self] cached in
+                        guard let self else { return }
+                        let template: PeerVerification
+                        if let existing = (cached as? CachedUserData)?.verification { template = existing }
+                        else if let settings = (cached as? CachedUserData)?.botInfo?.verifierSettings { template = PeerVerification(botId: peer.id, iconFileId: settings.iconFileId, description: settings.customDescription ?? settings.companyName, descriptionEntities: settings.customDescriptionEntities ?? []) }
+                        else { self.message("Исходный значок @" + source + " сейчас недоступен."); return }
+                        VisualGramLocalAppearance.shared.update(accountId: self.context.account.peerId, targetPeerId: target) { $0.enabled = true; $0.verification = template; $0.verificationSource = source }
+                    }))
+                }
             }))
         }
+        alert.addAction(UIAlertAction(title: "Выключить", style: .destructive, handler: { [weak self] _ in
+            guard let self else { return }
+            VisualGramLocalAppearance.shared.update(accountId: self.context.account.peerId, targetPeerId: target) { $0.verification = nil; $0.verificationSource = nil }
+        }))
+        alert.addAction(UIAlertAction(title: "Отмена", style: .cancel)); self.presentNative(alert)
     }
 
     private func selectEmoji() {
@@ -324,26 +349,20 @@ private final class VisualGramAppearanceActions {
     }
 
     private func configureReceipt(direction: VisualGramGift.Direction = .received, completion: @escaping () -> Void) {
+        let target = self.targetPeerId
         self.direction = direction
-        self.form(title: direction == .sent ? "Кому отправить подарок" : "Кто подарил подарок", fields: [(direction == .sent ? "Юзернейм получателя" : "Юзернейм отправителя (необязательно)", ""), ("Дата: yyyy-MM-dd HH:mm", self.dateFormatter.string(from: Date())), ("Подпись к подарку", "")]) { [weak self] values in
-            guard let self, values.count == 3, let date = self.dateFormatter.date(from: values[1]), date.timeIntervalSince1970 >= 0, date.timeIntervalSince1970 <= Double(Int32.max) else { self?.message("Укажи корректную дату."); return }
-            self.giftDate = Int32(date.timeIntervalSince1970)
-            self.giftText = values[2]
-            self.counterpartyId = nil
-            if values[0].isEmpty {
-                if direction == .sent { self.message("Укажи получателя подарка.") }
-                else { completion() }
-                return
+        weak var details: ViewController?
+        let form = VisualGramDetailsController(context: self.context, title: direction == .sent ? "Отправить подарок" : "Добавить подарок", fields: [(direction == .sent ? "Получатель: @юзернейм или ID" : "Отправитель: @юзернейм или ID", ""), ("Подпись", "")], date: Int32(clamping: Int64(Date().timeIntervalSince1970)), seconds: true, save: { [weak self] texts, date in
+            guard let self, self.targetPeerId == target, texts.count == 2 else { return false }
+            self.giftDate = date; self.giftText = texts[1]
+            if texts[0].isEmpty && direction == .received { self.counterpartyId = nil; details?.dismiss(); completion(); return false }
+            self.resolvePerson(texts[0]) { [weak self] peer in
+                guard let self, self.targetPeerId == target, let peer else { self?.message("Пользователь не найден или выбран другой профиль."); return }
+                self.counterpartyId = peer.id.toInt64(); details?.dismiss(); completion()
             }
-            let name = values[0].trimmingCharacters(in: CharacterSet(charactersIn: "@"))
-            self.disposables.add((self.context.engine.peers.resolvePeerByName(name: name, referrer: nil)
-            |> deliverOnMainQueue).start(next: { [weak self] result in
-                guard let self, case let .result(peer) = result else { return }
-                guard let peer, case .user = peer else { self.message("Пользователь не найден."); return }
-                self.counterpartyId = peer.id.toInt64()
-                completion()
-            }))
-        }
+            return false
+        })
+        details = form; self.controller?.push(form)
     }
 
     private func selectOrdinaryGift() {
@@ -431,6 +450,7 @@ private final class VisualGramAppearanceActions {
     }
 
     private func chooseGiftDelivery(_ gift: VisualGramGift, completion: @escaping (Int32?) -> Void) {
+        if gift.date > Int32(clamping: Int64(Date().timeIntervalSince1970)) { completion(gift.date); return }
         let receiving = gift.direction == .received
         let alert = UIAlertController(title: receiving ? "Получить подарок" : "Отправить подарок", message: nil, preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: receiving ? "Получить сейчас" : "Отправить сейчас", style: .default, handler: { _ in completion(nil) }))
@@ -444,13 +464,10 @@ private final class VisualGramAppearanceActions {
     }
 
     private func pickDeliveryDate(currentTime: Int32?, completion: @escaping (Int32) -> Void) {
-        guard let controller = self.controller else { return }
-        let picker = ChatScheduleTimeController(context: self.context, mode: .scheduledMessages(sendWhenOnlineAvailable: false), style: .default, currentTime: currentTime, completion: { [weak self] time in
-            guard time > Int32(clamping: Int64(Date().timeIntervalSince1970)), time < Int32.max - 1 else { self?.message("Выбери время в будущем."); return }
-            completion(time)
-        })
-        let presenter = (controller.navigationController as? NavigationController)?.viewControllers.last as? ViewController ?? controller
-        presenter.present(picker, in: .window(.root))
+        self.controller?.push(VisualGramDetailsController(context: self.context, title: "Дата и время", fields: [], date: currentTime ?? Int32(clamping: Int64(Date().timeIntervalSince1970)) + 60, seconds: true, save: { [weak self] _, time in
+            guard time > Int32(clamping: Int64(Date().timeIntervalSince1970)), time < Int32.max - 1 else { self?.message("Выбери время в будущем."); return false }
+            completion(time); return true
+        }))
     }
 
     private func openScheduledGift(index: Int) {
@@ -473,41 +490,97 @@ private final class VisualGramAppearanceActions {
         self.presentNative(alert)
     }
 
-    private func openCrafts() {
-        guard self.targetPeerId == self.context.account.peerId else { self.message("Для крафта переключись на аккаунт владельца подарков."); return }
-        let candidates = self.appearance.gifts.filter { $0.direction == .received && $0.isHistoryOnly != true && $0.isCrafted != true }
-        var refresh: Signal<Bool, NoError> = .single(true)
-        for local in candidates {
-            guard case let .unique(gift) = local.gift else { continue }
-            let reference = local.reference(accountId: self.targetPeerId)
-            refresh = refresh |> mapToSignal { [context = self.context] _ in
-                context.engine.payments.getUniqueStarGift(slug: gift.slug)
-                |> map { fresh -> Bool in
-                    VisualGramLocalAppearance.shared.updateLocalCraftMetadata(accountId: context.account.peerId, reference: reference, gift: fresh)
-                    return true
-                }
-                |> `catch` { _ in .single(false) }
+    private func openUsernames() {
+        let target = self.targetPeerId, account = self.context.account.peerId
+        self.controller?.push(VisualGramListController(context: self.context, target: target, title: "Юзернеймы", rows: {
+            VisualGramLocalAppearance.shared.appearance(accountId: account, targetPeerId: target).usernames.map { .init(id: $0.name.lowercased(), title: "@" + $0.name, subtitle: VisualGramLocalAppearance.formatGrams($0.tonAmount) + " TON", gift: nil) }
+        }, reorder: { ids in
+            var saved = false
+            VisualGramLocalAppearance.shared.update(accountId: account, targetPeerId: target) { value in
+                guard ids.count == value.usernames.count, Set(ids).count == ids.count, Set(ids) == Set(value.usernames.map { $0.name.lowercased() }) else { return }
+                value.usernames = ids.compactMap { id in value.usernames.first(where: { $0.name.lowercased() == id }) }; saved = true
             }
-        }
-        self.disposables.add((refresh |> deliverOnMainQueue).start(next: { [weak self] _ in
-            guard let self else { return }
-            let now = Int32(clamping: Int64(Date().timeIntervalSince1970))
-            let eligible: (VisualGramGift) -> Bool = { local in
-                local.isCrafted != true && (local.craftChance ?? 0) > 0 && (local.canCraftAt ?? 0) <= now
-            }
-            guard self.appearance.gifts.contains(where: { $0.direction == .received && $0.isHistoryOnly != true && eligible($0) }) else { self.message("Нет доступных для крафта подарков. Метаданные загружаются из Telegram; проверь подключение и срок разблокировки подарков."); return }
-            self.controller?.push(VisualGramGiftGridController(context: self.context, target: self.targetPeerId, cardMode: true, filterGift: eligible, openGift: { [weak self] id in
-                guard let self, let local = self.appearance.gifts.first(where: { $0.identifier == id && $0.direction == .received && $0.isHistoryOnly != true }), case let .unique(gift) = local.displayGift(accountId: self.targetPeerId), eligible(local) else { return }
-                self.controller?.push(GiftCraftScreen(context: self.context, gift: gift, profileGiftsContext: nil))
-            }))
+            return saved
+        }, open: { [weak self] id in self?.editUsernameNamed(id) }, edit: { [weak self] id in self?.editUsernameNamed(id) }, delete: { id in
+            VisualGramLocalAppearance.shared.update(accountId: account, targetPeerId: target) { $0.usernames.removeAll { $0.name.lowercased() == id } }
         }))
     }
 
-    private func openGrid() {
-        self.controller?.push(VisualGramGiftGridController(context: self.context, target: self.targetPeerId, addGift: { [weak self] in self?.open(24) }, openGift: { [weak self] id in
-            guard let self, let index = self.appearance.gifts.firstIndex(where: { $0.identifier == id }) else { return }
-            self.openGift(index: index)
+    private func editUsernameNamed(_ id: String) {
+        guard let index = self.appearance.usernames.firstIndex(where: { $0.name.lowercased() == id }) else { return }
+        self.editUsername(index: index)
+    }
+
+    private func openGiftList(history: Bool) {
+        let target = self.targetPeerId, account = self.context.account.peerId
+        let formatter = DateFormatter(); formatter.dateFormat = "dd.MM.yyyy HH:mm:ss"
+        self.controller?.push(VisualGramListController(context: self.context, target: target, title: history ? "История операций" : "Мои подарки", rows: {
+            let value = VisualGramLocalAppearance.shared.appearance(accountId: account, targetPeerId: target)
+            let gifts = history ? VisualGramLocalAppearance.giftOperations(in: value) : VisualGramLocalAppearance.orderedOwnedGifts(in: value)
+            var rows: [VisualGramListRow] = gifts.map { local in
+                let title: String
+                switch local.gift { case let .unique(gift): title = "\(gift.title) #\(gift.number)"; case let .generic(gift): title = gift.title ?? "Подарок" }
+                let operation: String
+                switch local.operationKind { case .purchase: operation = "Покупка"; case .transfer: operation = "Передача"; case .craft: operation = "Крафт"; case .sent: operation = "Отправка"; default: operation = local.direction == .sent ? "Отправка" : "Получение" }
+                return .init(id: local.identifier, title: title, subtitle: (history ? operation + " · " : "") + formatter.string(from: Date(timeIntervalSince1970: TimeInterval(local.date))), gift: local)
+            }
+            if history {
+                for pending in VisualGramLocalAppearance.shared.pendingScheduledGifts where pending.targetPeerId == target.toInt64() {
+                    let title: String
+                    switch pending.gift.gift { case let .unique(gift): title = "\(gift.title) #\(gift.number)"; case let .generic(gift): title = gift.title ?? "Подарок" }
+                    rows.append(.init(id: "pending:" + pending.id, title: title, subtitle: "Отложено · " + formatter.string(from: Date(timeIntervalSince1970: TimeInterval(pending.deliveryDate))), gift: pending.gift))
+                }
+            }
+            return rows
+        }, reorder: history ? nil : { ids in VisualGramLocalAppearance.shared.saveGiftOrder(accountId: account, targetPeerId: target, identifiers: ids) }, open: { [weak self] id in
+            guard let self else { return }
+            if history { self.openOperation(id) }
+            else if let index = self.appearance.gifts.firstIndex(where: { $0.identifier == id }) { self.openGift(index: index) }
+        }, edit: { [weak self] id in self?.editGiftDetails(id: id, history: history) }, delete: { id in
+            if id.hasPrefix("pending:") { VisualGramLocalAppearance.shared.cancelScheduledGift(id: String(id.dropFirst(8))) }
+            else if history {
+                VisualGramLocalAppearance.shared.update(accountId: account, targetPeerId: target) { value in
+                    var items = VisualGramLocalAppearance.giftOperations(in: value); items.removeAll { $0.identifier == id }; value.giftOperationHistory = items
+                }
+            } else { VisualGramLocalAppearance.shared.removeLocalGifts(accountId: account, targetPeerId: target, identifiers: [id]) }
         }))
+    }
+
+    private func operation(_ id: String, history: Bool) -> VisualGramGift? {
+        if id.hasPrefix("pending:") { return self.scheduledGifts.first(where: { $0.id == String(id.dropFirst(8)) })?.gift }
+        return history ? VisualGramLocalAppearance.giftOperations(in: self.appearance).first(where: { $0.identifier == id }) : self.appearance.gifts.first(where: { $0.identifier == id && $0.isHistoryOnly != true && $0.direction == .received })
+    }
+
+    private func openOperation(_ id: String) {
+        guard var local = self.operation(id, history: true) else { return }
+        local.isHistoryOnly = true
+        if id.hasPrefix("pending:") { local.localIdentifier = "operation:" + id }
+        self.controller?.push(GiftViewScreen(context: self.context, subject: .profileGift(self.targetPeerId, local.profileGift(accountId: self.targetPeerId, sender: nil))))
+    }
+
+    private func editGiftDetails(id: String, history: Bool) {
+        guard let local = self.operation(id, history: history) else { return }
+        let target = self.targetPeerId
+        let initialDate = id.hasPrefix("pending:") ? self.scheduledGifts.first(where: { $0.id == String(id.dropFirst(8)) })?.deliveryDate ?? local.date : local.date
+        weak var details: ViewController?
+        let form = VisualGramDetailsController(context: self.context, title: "Данные подарка", fields: [(local.direction == .sent ? "Получатель: @юзернейм или ID" : "Отправитель: @юзернейм или ID", local.counterpartyId.map(String.init) ?? ""), ("Подпись", local.text)], date: initialDate, seconds: true, save: { [weak self] texts, date in
+            guard let self, texts.count == 2 else { return false }
+            let apply: (Int64?) -> Void = { [weak self] person in
+                guard let self else { return }
+                if id.hasPrefix("pending:") {
+                    guard date > Int32(clamping: Int64(Date().timeIntervalSince1970)) else { self.message("Выбери время в будущем."); return }
+                    var gift = local; gift.counterpartyId = person; gift.date = date; gift.text = texts[1]
+                    VisualGramLocalAppearance.shared.editScheduledGift(id: String(id.dropFirst(8)), gift: gift, deliveryDate: date)
+                } else {
+                    guard VisualGramLocalAppearance.shared.editGiftDetails(accountId: self.context.account.peerId, targetPeerId: target, identifier: id, history: history, counterpartyId: person, date: date, text: texts[1]) else { self.message("Запись изменилась или у получателя уже есть этот NFT."); return }
+                }
+                details?.dismiss()
+            }
+            if texts[0].isEmpty { apply(nil) }
+            else { self.resolvePerson(texts[0]) { [weak self] peer in guard let peer else { self?.message("Пользователь не найден."); return }; apply(peer.id.toInt64()) } }
+            return false
+        })
+        details = form; self.controller?.push(form)
     }
 
     private func openGift(index: Int) {
@@ -543,80 +616,36 @@ func visualGramAppearanceController(context: AccountContext) -> ViewController {
     let actions = VisualGramAppearanceActions(context: context)
     let signal = combineLatest(context.sharedContext.presentationData, VisualGramLocalAppearance.shared.changes, actions.expandedLists.get(), actions.activeSection.get())
     |> deliverOnMainQueue
-    |> map { presentationData, _, expanded, activeSection -> (ItemListControllerState, (ItemListNodeState, Any)) in
+    |> map { presentationData, _, _, activeSection -> (ItemListControllerState, (ItemListNodeState, Any)) in
         let value = actions.appearance
         var entries: [VisualGramAppearanceEntry] = []
         func add(_ id: Int32, _ section: Int32, _ title: String, _ kind: VisualGramAppearanceEntry.Kind) {
             entries.append(VisualGramAppearanceEntry(stableId: id, section: section, title: title, kind: kind, theme: presentationData.theme))
         }
-        add(900, -1, "Профиль", .button(activeSection == 0 ? "✓" : ""))
-        add(901, -1, "Подарки", .button(activeSection == 1 ? "✓" : ""))
-        add(902, -1, "Балансы", .button(activeSection == 2 ? "✓" : ""))
-        add(14, 1, "Цвета и фон профиля", .button(""))
-        add(15, 1, "Часы работы", .button(""))
-        add(16, 1, "Адрес", .button(""))
-        add(27, 2, "Мои подарки", .button(""))
-        add(28, 2, "Крафт подарков", .button(""))
-        add(903, -1, "Назад", .button(""))
-        add(32, 3, "Баланс GRAM", .button(value.grams.map { VisualGramLocalAppearance.formatGrams($0) } ?? "Не задан"))
-        add(33, 3, "Оформить карточку GRAM", .button(""))
-        add(0, 0, "Оформление профиля", .toggle(value.enabled))
-        add(1, 0, "Telegram Premium", .toggle(value.premium))
-        add(2, 0, "Галочка Telegram", .toggle(value.verified))
-        add(3, 0, "Верификация Major", .toggle(value.verification != nil))
-        add(4, 0, "Эмодзи-статус", .button(""))
-        add(5, 0, "Убрать статус", .button(""))
-        add(6, 0, "Настройки профиля", .info)
-        add(7, -1, "Чей профиль оформить", .button(actions.targetTitle))
-        add(8, 0, "Выбрать исходный значок Major", .button(""))
-        add(9, 0, "Сборка Telegram: \(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "—")", .info)
-        add(10, 1, "Добавить NFT-юзернейм", .button(""))
-        add(11, 1, "Номер профиля / +888", .button(value.phoneNumber.map { "+\($0.name)" } ?? "Настоящий номер"))
-        add(12, 1, "Рейтинг Telegram", .button(value.starRating.map { "Уровень \($0.level)" } ?? "Настоящий рейтинг"))
-        add(13, 1, "Юзернеймы (\(value.usernames.count))", .button(expanded & 1 == 0 ? "Развернуть" : "Свернуть"))
-        add(24, 2, "Добавить NFT в профиль", .button(""))
-        add(30, 3, "Баланс звёзд", .button(value.stars.map(String.init) ?? "Настоящий баланс"))
-        add(31, 3, "Добавить операцию", .button(""))
-        add(40, 4, "Сбросить оформление", .button(""))
-        add(25, 2, "Отложенные подарки появятся в выбранное время при открытом клиенте или при следующем открытии. ", .info)
-
-        if expanded & 1 != 0 {
-        for (index, username) in value.usernames.enumerated() { add(1000 + Int32(index), 1, "@\(username.name)", .button("\(Double(username.tonAmount) / 1_000_000_000) TON")) }
-        }
-        add(26, 2, "История подарков", .button(expanded & 2 == 0 ? "Развернуть" : "Свернуть"))
-        if expanded & 2 != 0 {
-        for (index, local) in value.gifts.enumerated() where local.direction == .sent || local.isHistoryOnly == true {
-            let title: String
-            switch local.gift {
-            case let .unique(gift): title = "\(gift.title) #\(gift.number)"
-            case let .generic(gift): title = gift.title ?? "Подарок \(gift.id)"
-            }
-            add(2000 + Int32(index), 2, local.direction == .sent ? "Отправлено: \(title)" : title, .button(""))
-        }
-        }
-        let queue = VisualGramLocalAppearance.shared.pendingScheduledGifts.filter { $0.targetPeerId == actions.targetPeerId.toInt64() }.sorted { $0.deliveryDate < $1.deliveryDate }
-        let formatter = DateFormatter()
-        formatter.dateStyle = .short
-        formatter.timeStyle = .short
-        for (index, pending) in queue.prefix(1000).enumerated() {
-            let title: String
-            switch pending.gift.gift {
-            case let .unique(gift): title = "\(gift.title) #\(gift.number)"
-            case let .generic(gift): title = gift.title ?? "Подарок \(gift.id)"
-            }
-            add(3000 + Int32(index), 5, "Отложено: \(title)", .button(formatter.string(from: Date(timeIntervalSince1970: TimeInterval(pending.deliveryDate)))))
-        }
-        entries.removeAll { entry in
-            if entry.stableId >= 900 && entry.stableId <= 902 { return activeSection != -1 }
-            if entry.stableId == 903 { return activeSection == -1 }
-            if entry.stableId == 7 { return false }
-            if entry.stableId == 0 { return activeSection != -1 }
-            if activeSection == -1 { return true }
-            if entry.stableId == 6 || entry.stableId == 9 { return true }
+        add(7, -1, "Выбор профиля", .button(actions.targetTitle))
+        if activeSection == -1 {
+            add(900, 0, "Профиль", .button("")); add(901, 0, "Подарки", .button("")); add(902, 0, "Балансы", .button(""))
+        } else {
+            add(903, -1, "Назад", .button(""))
             switch activeSection {
-            case 1: return entry.section != 2 && entry.section != 5
-            case 2: return entry.section != 3
-            default: return entry.section != 0 && entry.section != 1 && entry.section != 4
+            case 0:
+                add(1, 0, "Telegram Premium", .toggle(value.premium))
+                add(2, 0, "Галочка Telegram", .toggle(value.verified))
+                add(3, 0, "Верификация", .button(value.verification == nil ? "Выключена" : (value.verificationSource == "hold" ? "Hold" : "Major")))
+                add(10, 1, "Добавить NFT-юзернейм", .button(""))
+                add(11, 1, "Номер профиля", .button(value.phoneNumber.map { "+" + $0.name } ?? ""))
+                add(13, 1, "Юзернеймы", .button(String(value.usernames.count)))
+                add(14, 2, "Цвета и фон профиля", .button(""))
+                add(15, 2, "Часы работы", .button("")); add(16, 2, "Адрес", .button(""))
+            case 1:
+                add(24, 0, "Добавить NFT", .button("")); add(20, 0, "Добавить обычный подарок", .button(""))
+                add(23, 1, "Отправить NFT", .button("")); add(22, 1, "Отправить обычный подарок", .button(""))
+                add(27, 2, "Мои подарки", .button("")); add(26, 2, "История операций", .button(""))
+            default:
+                add(30, 0, "Баланс звёзд", .button(value.stars.map(String.init) ?? "Настоящий баланс"))
+                add(31, 0, "Добавить операцию", .button(""))
+                add(32, 1, "Баланс GRAM", .button(value.grams.map { VisualGramLocalAppearance.formatGrams($0) } ?? "Не задан"))
+                add(33, 1, "Оформить карточку GRAM", .button(""))
             }
         }
         entries.sort()

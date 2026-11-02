@@ -16,14 +16,17 @@ public extension VisualGramLocalAppearance {
         NSDecimalNumber(decimal: Decimal(nano) / Decimal(gramScale)).stringValue
     }
 
-    func localGramPrice(accountId: EnginePeer.Id, gift: StarGift.UniqueGift) -> Int64? {
-        return Self.gramPrice(gift: gift, starsPerUnit: self.appearance(accountId: accountId).gramStarsPerUnit)
+    func localGramPrice(accountId: EnginePeer.Id, gift: StarGift.UniqueGift, starsPerGram: Decimal? = nil) -> Int64? {
+        return Self.gramPrice(gift: gift, starsPerUnit: starsPerGram)
     }
 
-    private static func gramPrice(gift: StarGift.UniqueGift, starsPerUnit: Int64?) -> Int64? {
-        // A listing's currency is authoritative. Never manufacture a second quote.
-        guard let amount = gift.resellAmounts?.first(where: { $0.currency == .ton })?.amount.value, amount > 0 else { return nil }
-        return amount
+    private static func gramPrice(gift: StarGift.UniqueGift, starsPerUnit: Decimal?) -> Int64? {
+        if let amount = gift.resellAmounts?.first(where: { $0.currency == .ton })?.amount.value, amount > 0 { return amount }
+        guard !gift.resellForTonOnly, let stars = gift.resellAmounts?.first(where: { $0.currency == .stars })?.amount.value, stars > 0, let rate = starsPerUnit, rate > 0 else { return nil }
+        var raw = Decimal(stars) * Decimal(Self.gramScale) / rate
+        var rounded = Decimal(); NSDecimalRound(&rounded, &raw, 0, .down)
+        guard rounded > 0, rounded <= Decimal(Int64.max) else { return nil }
+        return NSDecimalNumber(decimal: rounded).int64Value
     }
 
     func displayWalletCard(accountId: EnginePeer.Id, peerId: EnginePeer.Id, server: WalletCard?, appearanceOverride: VisualGramAppearance? = nil) -> WalletCard? {
@@ -47,24 +50,34 @@ public extension VisualGramLocalAppearance {
         return WalletCard(address: "", balance: grams, stickers: stickers, backgroundNft: background)
     }
 
-    func giftForLocalPurchase(accountId: EnginePeer.Id, gift: StarGift.UniqueGift) -> StarGift.UniqueGift {
-        return gift
+    func giftForLocalPurchase(accountId: EnginePeer.Id, gift: StarGift.UniqueGift, starsPerGram: Decimal? = nil) -> StarGift.UniqueGift {
+        guard !gift.resellForTonOnly, let grams = self.localGramPrice(accountId: accountId, gift: gift, starsPerGram: starsPerGram) else { return gift }
+        var prices = gift.resellAmounts ?? []
+        if !prices.contains(where: { $0.currency == .ton }) { prices.append(CurrencyAmount(amount: StarsAmount(value: grams, nanos: 0), currency: .ton)) }
+        return StarGift.UniqueGift(id: gift.id, giftId: gift.giftId, title: gift.title, number: gift.number, slug: gift.slug, owner: gift.owner, attributes: gift.attributes, availability: gift.availability, giftAddress: gift.giftAddress, resellAmounts: prices, resellForTonOnly: gift.resellForTonOnly, releasedBy: gift.releasedBy, valueAmount: gift.valueAmount, valueCurrency: gift.valueCurrency, valueUsdAmount: gift.valueUsdAmount, flags: gift.flags, themePeerId: gift.themePeerId, peerColor: gift.peerColor, hostPeerId: gift.hostPeerId, minOfferStars: gift.minOfferStars, craftChancePermille: gift.craftChancePermille)
     }
 
-    func buyLocalGiftWithGrams(accountId: EnginePeer.Id, recipientPeerId: EnginePeer.Id, gift: StarGift.UniqueGift, price: Int64, requireListing: Bool, now: Int32) -> VisualGramGiftPurchaseResult {
+    func buyLocalGiftWithGrams(accountId: EnginePeer.Id, recipientPeerId: EnginePeer.Id, gift: StarGift.UniqueGift, price: Int64, requireListing: Bool, now: Int32, starsPerGram: Decimal? = nil, text: String = "", nameHidden: Bool = false, entities: [MessageTextEntity]? = nil) -> VisualGramGiftPurchaseResult {
         guard price > 0 else { return .priceChanged }
         var result: VisualGramGiftPurchaseResult = .unavailable
         self.updateValues { values in
             let buyerKey = String(accountId.toInt64())
             guard var buyer = values[buyerKey], buyer.enabled, let balance = buyer.grams else { result = .invalid; return }
-            guard Self.gramPrice(gift: gift, starsPerUnit: buyer.gramStarsPerUnit) == price else { result = .priceChanged; return }
+            guard Self.gramPrice(gift: gift, starsPerUnit: starsPerGram) == price else { result = .priceChanged; return }
             guard balance >= price else { result = .insufficientBalance; return }
             let seller = Self.localGiftSeller(values: values, gift: gift)
             if let (sellerId, index) = seller {
                 let sellerRawId = sellerId.toInt64(), key = String(sellerId.toInt64())
-                guard key != buyerKey, key != String(recipientPeerId.toInt64()), var sellerValue = values[key], sellerValue.enabled,
-                      let askingGrams = sellerValue.gifts[index].resaleGrams, askingGrams > 0 else { return }
-                guard askingGrams == price else { result = .priceChanged; return }
+                guard key != buyerKey, key != String(recipientPeerId.toInt64()), var sellerValue = values[key], sellerValue.enabled else { return }
+                let listing = sellerValue.gifts[index]
+                let asking: Int64?
+                if let grams = listing.resaleGrams, grams > 0 { asking = grams }
+                else if let stars = listing.resaleStars, stars > 0, let rate = starsPerGram, rate > 0 {
+                    var raw = Decimal(stars) * Decimal(Self.gramScale) / rate
+                    var rounded = Decimal(); NSDecimalRound(&rounded, &raw, 0, .down)
+                    asking = rounded > 0 && rounded <= Decimal(Int64.max) ? NSDecimalNumber(decimal: rounded).int64Value : nil
+                } else { asking = nil }
+                guard asking == price else { result = .priceChanged; return }
                 let (credited, overflow) = (sellerValue.grams ?? 0).addingReportingOverflow(price)
                 guard !overflow else { result = .invalid; return }
                 buyer.grams = balance - price
@@ -95,6 +108,7 @@ public extension VisualGramLocalAppearance {
                     values[buyerKey]?.gifts.append(local)
                 }
             }
+            Self.applyPurchaseMessage(values: &values, slug: gift.slug, buyerId: accountId, now: now, text: text, nameHidden: nameHidden, entities: entities)
             result = .success
         }
         return result

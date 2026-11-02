@@ -62,6 +62,7 @@ public extension VisualGramLocalAppearance {
             let consumed = Set(inputs.map { $0.identifier })
             for index in owner.gifts.indices where consumed.contains(owner.gifts[index].identifier) {
                 owner.gifts[index].isHistoryOnly = true
+                owner.gifts[index].consumedAt = now
                 owner.gifts[index].resaleStars = nil
                 owner.gifts[index].resaleGrams = nil
                 owner.gifts[index].savedToProfile = false

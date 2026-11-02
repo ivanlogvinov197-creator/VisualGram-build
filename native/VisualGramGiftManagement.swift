@@ -36,6 +36,88 @@ public extension VisualGramLocalAppearance {
         }.map { $0.element }
     }
 
+    static func operationSnapshot(_ gift: VisualGramGift, kind: VisualGramGift.OperationKind? = nil, legacy: Bool = false) -> VisualGramGift {
+        var result = gift
+        result.localIdentifier = legacy ? "operation:" + gift.identifier : "operation:" + UUID().uuidString
+        result.operationSourceId = gift.identifier
+        if kind == .craft, let consumedAt = gift.consumedAt { result.date = consumedAt }
+        result.operationKind = kind ?? (gift.isCrafted == true ? .craft : (gift.purchaseStars != nil || gift.purchaseGrams != nil ? .purchase : (gift.isTransferred == true ? .transfer : (gift.direction == .sent ? .sent : .received))))
+        result.isHistoryOnly = true; result.resaleStars = nil; result.resaleGrams = nil
+        return result
+    }
+
+    static func giftOperations(in value: VisualGramAppearance) -> [VisualGramGift] {
+        return (value.giftOperationHistory ?? value.gifts.map { Self.operationSnapshot($0, legacy: true) }).sorted { $0.date > $1.date }
+    }
+
+    static func recordGiftOperations(previous: VisualGramAppearance?, value: inout VisualGramAppearance) {
+        guard value.enabled || !value.gifts.isEmpty || value.giftOperationHistory != nil else { return }
+        if value.giftOperationHistory == nil { value.giftOperationHistory = (previous?.gifts ?? []).map { Self.operationSnapshot($0, legacy: true) } }
+        let old = previous?.gifts ?? []
+        let ids = Set(old.map { $0.identifier })
+        let added = value.gifts.filter { !ids.contains($0.identifier) }
+        value.giftOperationHistory?.append(contentsOf: added.map { Self.operationSnapshot($0) })
+        // Failed crafting has no newly inserted result. Record it once without
+        // turning consumed inputs into active gifts or changing their model.
+        let previousActive = Set(old.filter { $0.direction == .received && $0.isHistoryOnly != true }.map { $0.identifier })
+        if added.isEmpty, let consumed = value.gifts.first(where: { current in
+            current.direction == .received && current.isHistoryOnly == true && current.consumedAt != nil && previousActive.contains(current.identifier)
+        }) { value.giftOperationHistory?.append(Self.operationSnapshot(consumed, kind: .craft)) }
+    }
+
+    @discardableResult
+    func editGiftDetails(accountId: EnginePeer.Id, targetPeerId: EnginePeer.Id, identifier: String, history: Bool, counterpartyId: Int64?, date: Int32, text: String) -> Bool {
+        var edited = false
+        self.updateValues { values in
+            let key = String(targetPeerId.toInt64())
+            guard var value = values[key] else { return }
+            var operations = Self.giftOperations(in: value)
+            let record: VisualGramGift?
+            if history { record = operations.first(where: { $0.identifier == identifier }) }
+            else { record = value.gifts.first(where: { $0.identifier == identifier && $0.direction == .received && $0.isHistoryOnly != true }) }
+            guard let original = record else { return }
+            if original.direction == .sent && counterpartyId == nil { return }
+            let sourceId = history ? original.operationSourceId : original.identifier
+            let sourceIndex = value.gifts.firstIndex(where: { $0.identifier == sourceId && $0.date == original.date && $0.assetIdentifier == original.assetIdentifier })
+            var mirror: (String, Int, VisualGramGift)?
+            if sourceIndex != nil, let previousPeer = original.counterpartyId, previousPeer != targetPeerId.toInt64(), let other = values[String(previousPeer)], let index = other.gifts.firstIndex(where: { $0.assetIdentifier == original.assetIdentifier && $0.date == original.date && $0.counterpartyId == targetPeerId.toInt64() && $0.direction != original.direction }) {
+                mirror = (String(previousPeer), index, other.gifts[index])
+            }
+            if let mirror, let newPeer = counterpartyId, newPeer != original.counterpartyId, mirror.2.direction == .received && mirror.2.isHistoryOnly != true,
+               values[String(newPeer)]?.gifts.contains(where: { $0.assetIdentifier == original.assetIdentifier && $0.direction == .received && $0.isHistoryOnly != true && $0.identifier != mirror.2.identifier }) == true { return }
+            if let index = sourceIndex {
+                value.gifts[index].counterpartyId = counterpartyId; value.gifts[index].date = date; value.gifts[index].text = text; value.gifts[index].textEntities = nil
+                if mirror != nil, original.direction == .sent, counterpartyId == targetPeerId.toInt64() {
+                    value.gifts[index].direction = .received; value.gifts[index].isHistoryOnly = false
+                }
+            }
+            let operationIndex = history ? operations.firstIndex(where: { $0.identifier == identifier }) : operations.lastIndex(where: { $0.operationSourceId == identifier })
+            if let index = operationIndex { operations[index].counterpartyId = counterpartyId; operations[index].date = date; operations[index].text = text; operations[index].textEntities = nil }
+            value.giftOperationHistory = operations
+            values[key] = value
+            if let (oldKey, index, previous) = mirror {
+                var other = values[oldKey] ?? VisualGramAppearance()
+                var mirrored = previous; mirrored.counterpartyId = targetPeerId.toInt64(); mirrored.date = date; mirrored.text = text; mirrored.textEntities = nil
+                if let newPeer = counterpartyId, String(newPeer) == oldKey {
+                    other.gifts[index] = mirrored; values[oldKey] = other
+                } else {
+                    Self.removeGiftData(from: &other, identifiers: [previous.identifier]); values[oldKey] = other
+                    if let newPeer = counterpartyId, newPeer != targetPeerId.toInt64() {
+                        var target = values[String(newPeer)] ?? VisualGramAppearance(); target.enabled = true
+                        Self.insertGift(mirrored, into: &target); values[String(newPeer)] = target
+                    }
+                }
+                if counterpartyId == original.counterpartyId, var other = values[oldKey] {
+                    var ledger = Self.giftOperations(in: other)
+                    if let index = ledger.lastIndex(where: { $0.operationSourceId == previous.identifier && $0.date == previous.date }) { ledger[index].date = date; ledger[index].text = text; ledger[index].textEntities = nil }
+                    other.giftOperationHistory = ledger; values[oldKey] = other
+                }
+            }
+            edited = true
+        }
+        return edited
+    }
+
     @discardableResult
     func saveGiftOrder(accountId: EnginePeer.Id, targetPeerId: EnginePeer.Id, identifiers: [String]) -> Bool {
         var saved = false
@@ -90,6 +172,17 @@ public extension VisualGramLocalAppearance {
         }
     }
 
+    func editScheduledGift(id: String, gift: VisualGramGift, deliveryDate: Int32) {
+        self.updateValues { values in
+            for key in Array(values.keys) {
+                if let index = values[key]?.scheduledGifts?.firstIndex(where: { $0.id == id && $0.gift.identifier == gift.identifier }) {
+                    values[key]?.scheduledGifts?[index].gift = gift
+                    values[key]?.scheduledGifts?[index].deliveryDate = deliveryDate
+                }
+            }
+        }
+    }
+
     func cancelScheduledGift(id: String) {
         self.updateValues { values in
             for key in Array(values.keys) { values[key]?.scheduledGifts?.removeAll { $0.id == id } }
@@ -101,10 +194,25 @@ public extension VisualGramLocalAppearance {
     }
 
     func addGifts(accountId: EnginePeer.Id, targetPeerId: EnginePeer.Id, gifts: [VisualGramGift]) {
-        self.update(accountId: accountId, targetPeerId: targetPeerId) { value in
-            value.enabled = true
-            for gift in gifts { Self.insertGift(gift, into: &value) }
+        self.updateValues { values in
+            for gift in gifts { Self.insertDeliveredGift(gift, targetPeerId: targetPeerId, values: &values) }
         }
+    }
+
+    static func insertDeliveredGift(_ gift: VisualGramGift, targetPeerId: EnginePeer.Id, values: inout [String: VisualGramAppearance]) {
+        let key = String(targetPeerId.toInt64())
+        var target = values[key] ?? VisualGramAppearance(); target.enabled = true
+        if gift.direction == .sent, let recipient = gift.counterpartyId {
+            var incoming = gift; incoming.direction = .received; incoming.counterpartyId = targetPeerId.toInt64(); incoming.isHistoryOnly = false
+            if recipient == targetPeerId.toInt64() { Self.insertGift(incoming, into: &target) }
+            else {
+                var outgoing = gift; outgoing.isHistoryOnly = true; Self.insertGift(outgoing, into: &target)
+                let recipientKey = String(recipient)
+                var owner = values[recipientKey] ?? VisualGramAppearance(); owner.enabled = true
+                Self.insertGift(incoming, into: &owner); values[recipientKey] = owner
+            }
+        } else { Self.insertGift(gift, into: &target) }
+        values[key] = target
     }
 
     @discardableResult
@@ -188,10 +296,7 @@ public extension VisualGramLocalAppearance {
             for pending in delivered {
                 var gift = pending.gift
                 gift.date = pending.deliveryDate
-                let key = String(pending.targetPeerId)
-                var target = values[key] ?? VisualGramAppearance()
-                Self.insertGift(gift, into: &target)
-                values[key] = target
+                Self.insertDeliveredGift(gift, targetPeerId: EnginePeer.Id(pending.targetPeerId), values: &values)
             }
         }
         return delivered
@@ -251,7 +356,10 @@ public extension VisualGramLocalAppearance {
     }
 
     func removeLocalGifts(accountId: EnginePeer.Id, targetPeerId: EnginePeer.Id? = nil, identifiers: Set<String>) {
-        self.update(accountId: accountId, targetPeerId: targetPeerId) { value in
+        self.update(accountId: accountId, targetPeerId: targetPeerId) { value in Self.removeGiftData(from: &value, identifiers: identifiers) }
+    }
+
+    static func removeGiftData(from value: inout VisualGramAppearance, identifiers: Set<String>) {
             if case let .starGift(id, _, _, _, _, _, _, _, _) = value.emojiStatus?.content,
                value.gifts.contains(where: { local in
                    guard identifiers.contains(local.identifier), local.direction == .received, local.isHistoryOnly != true,
@@ -266,7 +374,6 @@ public extension VisualGramLocalAppearance {
             value.gramCardGiftIds?.removeAll { identifiers.contains($0) }
             value.gramCardPlacements = value.gramCardPlacements?.filter { !identifiers.contains($0.key) }
             if let id = value.gramCardBackgroundId, identifiers.contains(id) { value.gramCardBackgroundId = nil }
-        }
     }
 
     func reorderGifts(accountId: EnginePeer.Id, targetPeerId: EnginePeer.Id? = nil, references: [StarGiftReference], updatePins: Bool = false) {

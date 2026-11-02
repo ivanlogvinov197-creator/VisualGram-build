@@ -66,6 +66,12 @@ public struct VisualGramGift: Codable, Equatable {
             self.gift = gift
         }
     }
+    public enum OperationKind: String, Codable { case received, sent, purchase, transfer, craft }
+    public var operationSourceId: String?
+    public var consumedAt: Int32?
+    public var operationKind: OperationKind?
+    public var nameHidden: Bool?
+    public var textEntities: [MessageTextEntity]?
     public enum Direction: String, Codable { case received, sent }
     public var gift: StarGift
     public var counterpartyId: Int64?
@@ -120,9 +126,9 @@ public struct VisualGramGift: Codable, Equatable {
     public func displayGift(accountId: EnginePeer.Id) -> StarGift {
         guard case let .unique(gift) = self.gift else { return self.gift }
         let recipientId = self.direction == .sent ? (self.counterpartyId.map { EnginePeer.Id($0) } ?? accountId) : accountId
-        let senderId = self.direction == .sent ? accountId : self.counterpartyId.map { EnginePeer.Id($0) }
+        let senderId = self.nameHidden == true ? nil : (self.direction == .sent ? accountId : self.counterpartyId.map { EnginePeer.Id($0) })
         var attributes = gift.attributes.filter { $0.attributeType != .originalInfo }
-        if self.hidesOriginalInfo != true { attributes.append(.originalInfo(senderPeerId: senderId, recipientPeerId: recipientId, date: self.date, text: self.text.isEmpty ? nil : self.text, entities: nil)) }
+        if self.hidesOriginalInfo != true { attributes.append(.originalInfo(senderPeerId: senderId, recipientPeerId: recipientId, date: self.date, text: self.text.isEmpty ? nil : self.text, entities: self.textEntities)) }
         var prices: [CurrencyAmount] = []
         if let price = self.resaleStars, price > 0 { prices.append(CurrencyAmount(amount: StarsAmount(value: price, nanos: 0), currency: .stars)) }
         if let price = self.resaleGrams, price > 0 { prices.append(CurrencyAmount(amount: StarsAmount(value: price, nanos: 0), currency: .ton)) }
@@ -134,7 +140,7 @@ public struct VisualGramGift: Codable, Equatable {
         if case let .generic(gift) = self.gift { canUpgrade = gift.upgradeStars != nil && self.direction == .received && self.isHistoryOnly != true } else { canUpgrade = false }
         let transferStars: Int64?
         if case .unique = self.gift, self.direction == .received, self.isHistoryOnly != true { transferStars = VisualGramLocalAppearance.localGiftTransferStars } else { transferStars = nil }
-        return ProfileGiftsContext.State.StarGift(gift: self.displayGift(accountId: accountId), reference: self.reference(accountId: accountId), fromPeer: sender, date: self.date, text: self.text.isEmpty ? nil : self.text, entities: nil, nameHidden: false, savedToProfile: self.savedToProfile ?? true, pinnedToTop: self.pinnedToTop ?? false, convertStars: nil, canUpgrade: canUpgrade, canExportDate: nil, upgradeStars: nil, transferStars: transferStars, canTransferDate: nil, canResaleDate: nil, collectionIds: self.collectionIds, prepaidUpgradeHash: nil, upgradeSeparate: false, dropOriginalDetailsStars: nil, number: nil, isRefunded: false, canCraftAt: ((self.direction == .received && self.isHistoryOnly != true && self.isCrafted != true && (self.craftChance ?? 0) > 0) ? (self.canCraftAt ?? 0) : nil))
+        return ProfileGiftsContext.State.StarGift(gift: self.displayGift(accountId: accountId), reference: self.reference(accountId: accountId), fromPeer: sender, date: self.date, text: self.text.isEmpty ? nil : self.text, entities: self.textEntities, nameHidden: self.nameHidden ?? false, savedToProfile: self.savedToProfile ?? true, pinnedToTop: self.pinnedToTop ?? false, convertStars: nil, canUpgrade: canUpgrade, canExportDate: nil, upgradeStars: nil, transferStars: transferStars, canTransferDate: nil, canResaleDate: nil, collectionIds: self.collectionIds, prepaidUpgradeHash: nil, upgradeSeparate: false, dropOriginalDetailsStars: nil, number: nil, isRefunded: false, canCraftAt: ((self.direction == .received && self.isHistoryOnly != true && self.isCrafted != true && (self.craftChance ?? 0) > 0) ? (self.canCraftAt ?? 0) : nil))
     }
 }
 
@@ -143,10 +149,12 @@ public struct VisualGramAppearance: Codable, Equatable {
     public var premium = false
     public var verified = false
     public var verification: PeerVerification?
+    public var verificationSource: String?
     public var usernames: [VisualGramUsername] = []
     public var overridesEmojiStatus = false
     public var emojiStatus: PeerEmojiStatus?
     public var gifts: [VisualGramGift] = []
+    public var giftOperationHistory: [VisualGramGift]?
     public var giftOrder: [String]?
     public var stars: Int64?
     public var grams: Int64?
@@ -292,7 +300,14 @@ public final class VisualGramLocalAppearance {
 
     func updateValues(_ transform: (inout [String: VisualGramAppearance]) -> Void) {
         self.lock.lock()
+        let previous = self.values
         transform(&self.values)
+        for key in Array(self.values.keys) {
+            if var value = self.values[key] {
+                Self.recordGiftOperations(previous: previous[key], value: &value)
+                self.values[key] = value
+            }
+        }
         if let data = try? JSONEncoder().encode(self.values) {
             self.defaults.set(data, forKey: "visualgram.appearance.v3")
         }
