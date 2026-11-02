@@ -99,7 +99,7 @@ final class VisualGramGiftGridController: ViewController, UICollectionViewDataSo
 
     private func refresh() {
         let value = VisualGramLocalAppearance.shared.appearance(accountId: self.context.account.peerId, targetPeerId: self.target)
-        self.items = value.gifts.filter { gift in
+        self.items = VisualGramLocalAppearance.orderedOwnedGifts(in: value).filter { gift in
             guard gift.direction == .received, gift.isHistoryOnly != true else { return false }
             if let filterGift = self.filterGift, !filterGift(gift) { return false }
             if self.cardMode { if case .unique = gift.gift { return true }; return false }
@@ -217,8 +217,7 @@ private final class VisualGramGiftOrderController: ViewController, UITableViewDa
     private let table = UITableView(frame: .zero, style: .insetGrouped)
     init(context: AccountContext, target: EnginePeer.Id) {
         self.context = context; self.target = target
-        let owned = VisualGramLocalAppearance.shared.appearance(accountId: context.account.peerId, targetPeerId: target).gifts.filter { $0.direction == .received && $0.isHistoryOnly != true }
-        self.items = owned.filter { $0.pinnedToTop == true } + owned.filter { $0.pinnedToTop != true }
+        self.items = VisualGramLocalAppearance.orderedOwnedGifts(in: VisualGramLocalAppearance.shared.appearance(accountId: context.account.peerId, targetPeerId: target))
         super.init(navigationBarPresentationData: NavigationBarPresentationData(presentationData: context.sharedContext.currentPresentationData.with { $0 }))
         self.title = "Порядок подарков"
         self.navigationItem.leftBarButtonItem = UIBarButtonItem(title: "Отмена", style: .plain, target: self, action: #selector(self.cancel))
@@ -300,6 +299,8 @@ final class VisualGramCardEditorController: ViewController, UIGestureRecognizerD
         self.navigationItem.leftBarButtonItem = UIBarButtonItem(title: "Отмена", style: .plain, target: self, action: #selector(self.cancel))
         self.navigationItem.rightBarButtonItem = UIBarButtonItem(title: "Сохранить", style: .done, target: self, action: #selector(self.save))
         self.draft.enabled = true
+        self.draft.grams = self.draft.grams ?? 0
+        if let id = self.draft.gramCardBackgroundId, let local = self.draft.gifts.first(where: { $0.identifier == id }), case let .unique(gift) = local.gift, !WalletConfiguration.with(appConfiguration: context.currentAppConfiguration.with { $0 }).allowsCardBackground(giftSlug: gift.slug) { self.draft.gramCardBackgroundId = nil }
     }
     required init(coder: NSCoder) { preconditionFailure() }
     override func loadDisplayNode() {
@@ -319,7 +320,7 @@ final class VisualGramCardEditorController: ViewController, UIGestureRecognizerD
         }
         self.view.addSubview(self.buttons)
         for gesture in [self.pan, self.pinch, self.rotation, self.tap] { gesture.delegate = self }
-        self.pan.maximumNumberOfTouches = 1
+        self.pan.maximumNumberOfTouches = 2
     }
     override func containerLayoutUpdated(_ layout: ContainerViewLayout, transition: ContainedViewLayoutTransition) {
         super.containerLayoutUpdated(layout, transition: transition)
@@ -418,7 +419,8 @@ final class VisualGramCardEditorController: ViewController, UIGestureRecognizerD
         return self.selected != nil
     }
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
-        (gestureRecognizer === self.pinch && otherGestureRecognizer === self.rotation) || (gestureRecognizer === self.rotation && otherGestureRecognizer === self.pinch)
+        let gestures: [UIGestureRecognizer] = [self.pan, self.pinch, self.rotation]
+        return gestures.contains(where: { $0 === gestureRecognizer }) && gestures.contains(where: { $0 === otherGestureRecognizer })
     }
     private func modify(_ change: (inout VisualGramGift.CardPlacement) -> Void) {
         guard let id = self.selected, let index = self.draft.gramCardGiftIds?.firstIndex(of: id) else { return }
@@ -452,6 +454,7 @@ final class VisualGramCardEditorController: ViewController, UIGestureRecognizerD
             let owned = Set(value.gifts.filter { $0.direction == .received && $0.isHistoryOnly != true }.map { $0.identifier })
             let ids = self.draft.gramCardGiftIds ?? []
             guard ids.count <= 10, Set(ids).count == ids.count, Set(ids).isSubset(of: owned) else { return }
+            value.enabled = true; value.grams = value.grams ?? 0
             value.gramCardGiftIds = ids; value.gramCardBackgroundId = self.draft.gramCardBackgroundId
             value.gramCardPlacements = self.draft.gramCardPlacements?.filter { owned.contains($0.key) }; saved = true
         }

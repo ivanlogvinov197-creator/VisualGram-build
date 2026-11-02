@@ -21,6 +21,21 @@ public struct VisualGramScheduledGift: Codable, Equatable {
 }
 
 public extension VisualGramLocalAppearance {
+    static func orderedOwnedGifts(in value: VisualGramAppearance) -> [VisualGramGift] {
+        let owned = value.gifts.filter { $0.direction == .received && $0.isHistoryOnly != true }
+        var ranks: [String: Int] = [:]
+        for (index, id) in (value.giftOrder ?? []).enumerated() where ranks[id] == nil { ranks[id] = index }
+        return owned.enumerated().sorted { lhs, rhs in
+            let a = lhs.element, b = rhs.element
+            if (a.pinnedToTop == true) != (b.pinnedToTop == true) { return a.pinnedToTop == true }
+            if value.giftOrder != nil {
+                let first = ranks[a.identifier] ?? Int.max, second = ranks[b.identifier] ?? Int.max
+                if first != second { return first < second }
+            } else if a.pinnedToTop != true, a.date != b.date { return a.date > b.date }
+            return lhs.offset < rhs.offset
+        }.map { $0.element }
+    }
+
     @discardableResult
     func saveGiftOrder(accountId: EnginePeer.Id, targetPeerId: EnginePeer.Id, identifiers: [String]) -> Bool {
         var saved = false
