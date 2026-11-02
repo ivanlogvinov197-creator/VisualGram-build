@@ -16,6 +16,7 @@ def source():
 
 STUBS = r'''
 import Foundation
+public typealias MessageTextEntity = Int
 public struct EnginePeer: Equatable {
     public struct Id: Hashable { public let value: Int64; public init(_ value: Int64) { self.value = value }; public func toInt64() -> Int64 { value } }
     public let id: Id

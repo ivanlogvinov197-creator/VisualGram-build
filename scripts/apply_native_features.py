@@ -266,6 +266,8 @@ private func visualGramGiftHasPremium(context: AccountContext) -> Bool {
     apply_stars_history(root, project)
     from apply_native_november import apply_november
     apply_november(root, project)
+    from apply_native_followup import apply_followup
+    apply_followup(root, project)
 
 
 if __name__ == "__main__":

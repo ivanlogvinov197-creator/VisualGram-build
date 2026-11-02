@@ -18,8 +18,8 @@ def source():
 
 
 CHECKS = r'''
-func nft(_ id: Int64, chance: Int32? = 500, grams: Int64? = nil, type: Int64 = 42, ownerId: EnginePeer.Id = .init(10)) -> StarGift.UniqueGift {
-    .init(id: id, giftId: type, title: "Gift", number: Int32(id), slug: "Gift-\(id)", owner: .peerId(ownerId), attributes: [.model(1), .pattern(2), .backdrop(3)], availability: .init(issued: 1, total: 1000), giftAddress: nil, resellAmounts: [CurrencyAmount(amount: .init(value: grams ?? 100, nanos: 0), currency: grams == nil ? .stars : .ton)], resellForTonOnly: false, releasedBy: nil, valueAmount: nil, valueCurrency: nil, valueUsdAmount: nil, flags: [], themePeerId: nil, peerColor: nil, hostPeerId: nil, minOfferStars: nil, craftChancePermille: chance)
+func nft(_ id: Int64, chance: Int32? = 500, grams: Int64? = nil, tonOnly: Bool = false, type: Int64 = 42, ownerId: EnginePeer.Id = .init(10)) -> StarGift.UniqueGift {
+    .init(id: id, giftId: type, title: "Gift", number: Int32(id), slug: "Gift-\(id)", owner: .peerId(ownerId), attributes: [.model(1), .pattern(2), .backdrop(3)], availability: .init(issued: 1, total: 1000), giftAddress: nil, resellAmounts: [CurrencyAmount(amount: .init(value: grams ?? 100, nanos: 0), currency: grams == nil ? .stars : .ton)], resellForTonOnly: tonOnly, releasedBy: nil, valueAmount: nil, valueCurrency: nil, valueUsdAmount: nil, flags: [], themePeerId: nil, peerColor: nil, hostPeerId: nil, minOfferStars: nil, craftChancePermille: chance)
 }
 let a = EnginePeer.Id(10), b = EnginePeer.Id(20)
 let store = VisualGramLocalAppearance()
@@ -132,6 +132,50 @@ assert(metadata.appearance(accountId: a).gifts[0].text == "local text" && metada
 metadata.values["10"]?.gifts[0].isHistoryOnly = true
 metadata.updateLocalCraftMetadata(accountId: a, reference: legacy.reference(accountId: a), gift: nft(55, chance: nil))
 assert(metadata.appearance(accountId: a).gifts[0].craftChance == 500, "late refresh touched consumed history")
+
+let dual = VisualGramLocalAppearance()
+dual.values["10"] = .init(enabled: true, gifts: [], stars: 900)
+dual.values["10"]?.grams = 3_000_000_000
+let quote = dual.giftForLocalPurchase(accountId: a, gift: nft(801), starsPerGram: Decimal(80))
+assert(quote.resellAmounts?.first(where: { $0.currency == .ton })?.amount.value == 1_250_000_000)
+assert(!quote.resellForTonOnly)
+assert(dual.buyLocalGiftWithGrams(accountId: a, recipientPeerId: a, gift: nft(801), price: 1_250_000_000, requireListing: false, now: 1000, starsPerGram: Decimal(80), text: "Caption", nameHidden: false, entities: [1, 2]) == .success)
+assert(dual.appearance(accountId: a).grams == 1_750_000_000 && dual.appearance(accountId: a).stars == 900)
+assert(dual.appearance(accountId: a).gifts.last?.text == "Caption" && dual.appearance(accountId: a).gifts.last?.nameHidden == false)
+assert(dual.appearance(accountId: a).gifts.last?.textEntities == [1, 2])
+let gramOnly = nft(802, grams: 1_250_000_000, tonOnly: true)
+assert(dual.buyLocalGift(accountId: a, recipientPeerId: a, gift: gramOnly, price: 100, requireListing: false, now: 1001) == .unavailable)
+assert(dual.appearance(accountId: a).stars == 900)
+assert(dual.giftForLocalPurchase(accountId: a, gift: gramOnly, starsPerGram: Decimal(80)).resellForTonOnly)
+let historyStore = VisualGramLocalAppearance()
+var historic = VisualGramAppearance(enabled: true, gifts: [first])
+VisualGramLocalAppearance.recordGiftOperations(previous: nil, value: &historic)
+assert(historic.giftOperationHistory?.count == 1)
+let receiptId = historic.giftOperationHistory![0].identifier
+let previousHistory = historic
+historic.gifts.append(second)
+VisualGramLocalAppearance.recordGiftOperations(previous: previousHistory, value: &historic)
+assert(historic.giftOperationHistory?.count == 2)
+let savedHistory = historic
+VisualGramLocalAppearance.recordGiftOperations(previous: savedHistory, value: &historic)
+assert(historic.giftOperationHistory?.count == 2, "metadata update duplicated operation history")
+historic.giftOperationHistory?.removeAll { $0.identifier == receiptId }
+assert(historic.gifts.count == 2 && historic.giftOperationHistory?.count == 1, "history deletion removed ownership")
+historyStore.values["10"] = historic
+assert(historyStore.editGiftDetails(accountId: a, targetPeerId: a, identifier: second.identifier, history: false, counterpartyId: 30, date: 123456789, text: "edited"))
+assert(historyStore.appearance(accountId: a).gifts.last?.gift == second.gift && historyStore.appearance(accountId: a).gifts.last?.text == "edited")
+let senderStore = VisualGramLocalAppearance()
+var outgoing = VisualGramGift(gift: .unique(nft(901)), counterpartyId: b.toInt64(), direction: .sent, date: 90, text: "hello")
+senderStore.addGift(accountId: a, targetPeerId: a, gift: outgoing)
+assert(senderStore.appearance(accountId: a).gifts.first?.isHistoryOnly == true)
+assert(senderStore.appearance(accountId: b).gifts.first?.direction == .received && senderStore.appearance(accountId: b).gifts.first?.text == "hello")
+assert(senderStore.editGiftDetails(accountId: a, targetPeerId: a, identifier: outgoing.identifier, history: true, counterpartyId: 30, date: 92, text: "moved") == false, "gift ID was confused with operation ID")
+assert(senderStore.editGiftDetails(accountId: a, targetPeerId: b, identifier: outgoing.identifier, history: false, counterpartyId: 10, date: 93, text: "changed"))
+assert(senderStore.appearance(accountId: a).gifts.first?.date == 93 && senderStore.appearance(accountId: b).gifts.first?.date == 93)
+assert(senderStore.editGiftDetails(accountId: a, targetPeerId: b, identifier: outgoing.identifier, history: false, counterpartyId: 20, date: 94, text: "self"))
+assert(senderStore.appearance(accountId: b).gifts.count == 1 && senderStore.appearance(accountId: b).gifts.first?.direction == .received, "editing sender to self replaced ownership with outgoing history")
+assert(senderStore.appearance(accountId: a).gifts.isEmpty)
+
 print("PASS: GRAM precision/overflow, strict quote currency, debit/history, duplicate/insufficient balance, persistence; craft success/failure/consumption, retained history, unlock date, owner and replay guards")
 '''
 

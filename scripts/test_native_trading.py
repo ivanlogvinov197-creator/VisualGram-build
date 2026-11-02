@@ -30,6 +30,7 @@ public struct VisualGramAppearance: Codable {
     var enabled = false
     var premium = false
     var gifts: [VisualGramGift] = []
+    var giftOperationHistory: [VisualGramGift]?
     var giftOrder: [String]?
     var gramCardGiftIds: [String]?
     var gramCardBackgroundId: String?
