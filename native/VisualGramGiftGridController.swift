@@ -462,6 +462,9 @@ final class VisualGramCardEditorController: ViewController, UIGestureRecognizerD
     }
     private func message(_ text: String) {
         let alert = UIAlertController(title: nil, message: text, preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: "OK", style: .default)); self.present(alert, animated: true)
+        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        var presenter: UIViewController? = self.navigationController?.view.window?.rootViewController ?? self
+        while let presented = presenter?.presentedViewController { presenter = presented }
+        presenter?.present(alert, animated: true)
     }
 }
