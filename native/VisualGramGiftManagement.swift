@@ -314,11 +314,11 @@ public extension VisualGramLocalAppearance {
 
     // Read-only preview samples provide the original media and valid attribute combinations.
     // This creates a private visual collectible, without calling an upgrade/payment RPC.
-    func upgradeLocalGift(accountId: EnginePeer.Id, reference: StarGiftReference?, preview: StarGiftUpgradePreview, keepOriginalInfo: Bool) -> ProfileGiftsContext.State.StarGift? {
+    func upgradeLocalGift(accountId: EnginePeer.Id, reference: StarGiftReference?, preview: StarGiftUpgradePreview, keepOriginalInfo: Bool, template: StarGift.UniqueGift? = nil) -> ProfileGiftsContext.State.StarGift? {
         guard self.canManageLocalGift(accountId: accountId, reference: reference),
               let local = self.localGift(accountId: accountId, reference: reference), local.direction == .received,
               case let .generic(generic) = local.gift, case let .message(messageId) = reference else { return nil }
-        guard let unique = Self.makeUpgradedGift(generic, preview: preview, ownerId: messageId.peerId) else { return nil }
+        guard let unique = Self.makeUpgradedGift(generic, preview: preview, ownerId: messageId.peerId, template: template) else { return nil }
         var result: VisualGramGift?
         self.update(accountId: accountId, targetPeerId: messageId.peerId) { value in
             guard let index = value.gifts.firstIndex(where: { $0.identifier == local.identifier }),
@@ -331,19 +331,23 @@ public extension VisualGramLocalAppearance {
         return result?.profileGift(accountId: messageId.peerId, sender: nil)
     }
 
-    static func makeUpgradedGift(_ generic: StarGift.Gift, preview: StarGiftUpgradePreview, ownerId: EnginePeer.Id) -> StarGift.UniqueGift? {
+    static func makeUpgradedGift(_ generic: StarGift.Gift, preview: StarGiftUpgradePreview, ownerId: EnginePeer.Id, template: StarGift.UniqueGift? = nil) -> StarGift.UniqueGift? {
+        guard template == nil || template?.giftId == generic.id else { return nil }
         guard generic.upgradeStars != nil,
               let model = preview.attributes.filter({ if case let .model(_, _, _, crafted) = $0 { return !crafted }; return false }).randomElement(),
               let pattern = preview.attributes.filter({ $0.attributeType == .pattern }).randomElement(),
               let backdrop = preview.attributes.filter({ $0.attributeType == .backdrop }).randomElement() else { return nil }
-        let total = max(1, generic.availability?.total ?? 100000)
+        let total = max(1, template?.availability.total ?? generic.availability?.total ?? 100000)
+        let number = template?.number ?? Int32.random(in: 1 ... total)
+        let title = template?.title ?? generic.title ?? "Gift"
+        let prefix = title.filter { $0.isASCII && ($0.isLetter || $0.isNumber) }
         return StarGift.UniqueGift(id: -Int64.random(in: 1 ... Int64.max), giftId: generic.id,
-            title: generic.title ?? "Коллекционный подарок", number: Int32.random(in: 1 ... total),
-            slug: "Gift-\(UUID().uuidString)", owner: .peerId(ownerId), attributes: [model, pattern, backdrop],
+            title: title, number: number,
+            slug: template?.slug ?? "\(prefix.isEmpty ? "Gift" : prefix)-\(number)", owner: .peerId(ownerId), attributes: template.map { $0.attributes.filter { $0.attributeType != .originalInfo } } ?? [model, pattern, backdrop],
             availability: .init(issued: 1, total: total), giftAddress: nil, resellAmounts: nil,
             resellForTonOnly: false, releasedBy: generic.releasedBy, valueAmount: nil, valueCurrency: nil,
             valueUsdAmount: nil, flags: [], themePeerId: nil, peerColor: nil, hostPeerId: nil,
-            minOfferStars: nil, craftChancePermille: nil)
+            minOfferStars: nil, craftChancePermille: template?.craftChancePermille)
     }
 
     @discardableResult

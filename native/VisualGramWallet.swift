@@ -16,6 +16,12 @@ public extension VisualGramLocalAppearance {
         NSDecimalNumber(decimal: Decimal(nano) / Decimal(gramScale)).stringValue
     }
 
+    static func cardStickerAddress(_ gift: VisualGramGift) -> String { "visualgram:" + gift.identifier }
+
+    static func resetGramCard(in value: inout VisualGramAppearance) {
+        value.gramCardGiftIds = []; value.gramCardBackgroundId = nil; value.gramCardPlacements = [:]
+    }
+
     func localGramPrice(accountId: EnginePeer.Id, gift: StarGift.UniqueGift, starsPerGram: Decimal? = nil) -> Int64? {
         return Self.gramPrice(gift: gift, starsPerUnit: starsPerGram)
     }
@@ -37,14 +43,14 @@ public extension VisualGramLocalAppearance {
         }
         let stickers = selected.enumerated().compactMap { index, local -> WalletCard.Sticker? in
             guard case let .unique(gift) = local.displayGift(accountId: peerId) else { return nil }
-            let nft = WalletNftItem(collectionAddress: nil, address: "visualgram:" + gift.slug, ownerAddress: "", index: String(gift.number), name: gift.title, description: nil, image: nil, imageSmall: nil, contentUrl: nil, lottie: nil, attributes: nil, extra: nil, gift: gift)
+            let nft = WalletNftItem(collectionAddress: nil, address: Self.cardStickerAddress(local), ownerAddress: "", index: String(gift.number), name: gift.title, description: nil, image: nil, imageSmall: nil, contentUrl: nil, lottie: nil, attributes: nil, extra: nil, gift: gift)
             let placement = (value.gramCardPlacements?[local.identifier] ?? .init(x: 20.0 + Double(index % 4) * 20.0, y: 74.0 - Double(index / 4) * 24.0)).normalized
             let width = 83.4 / 361.0 * 100 * placement.scale
             return WalletCard.Sticker(coordinates: .init(x: placement.x, y: placement.y, width: width, height: width * 370 / 220, rotation: placement.angle, cornerRadius: nil), nft: nft)
         }
         var background: WalletNftItem?
-        if let local = selected.first(where: { $0.identifier == value.gramCardBackgroundId }), case let .unique(gift) = local.gift {
-            background = stickers.first(where: { $0.nft.address == "visualgram:" + gift.slug })?.nft
+        if let local = selected.first(where: { $0.identifier == value.gramCardBackgroundId }) {
+            background = stickers.first(where: { $0.nft.address == Self.cardStickerAddress(local) })?.nft
         }
         // Empty address keeps the native receive/QR action unavailable for a local card.
         return WalletCard(address: "", balance: grams, stickers: stickers, backgroundNft: background)

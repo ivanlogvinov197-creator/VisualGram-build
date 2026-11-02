@@ -146,6 +146,8 @@ final class VisualGramListController: ViewController, UITableViewDataSource, UIT
     override func loadDisplayNode() {
         self.displayNode = ASDisplayNode(); self.displayNodeDidLoad()
         self.displayNode.backgroundColor = self.context.sharedContext.currentPresentationData.with { $0 }.theme.list.blocksBackgroundColor
+        self.view.disablesInteractiveTransitionGestureRecognizerNow = { true }
+        self.table.disablesInteractiveTransitionGestureRecognizerNow = { true }
         self.table.backgroundColor = .clear; self.table.dataSource = self; self.table.delegate = self
         self.table.dragDelegate = self; self.table.dropDelegate = self; self.table.dragInteractionEnabled = self.reorder != nil
         self.table.rowHeight = 74; self.table.register(VisualGramListCell.self, forCellReuseIdentifier: "item")

@@ -151,7 +151,7 @@ public extension VisualGramLocalAppearance {
         return result
     }
 
-    func buyLocalOrdinaryGift(accountId: EnginePeer.Id, recipientPeerId: EnginePeer.Id, gift: StarGift.Gift, text: String, includeUpgrade: Bool, preview: StarGiftUpgradePreview?, hasPremium: Bool = false, now: Int32) -> VisualGramGiftPurchaseResult {
+    func buyLocalOrdinaryGift(accountId: EnginePeer.Id, recipientPeerId: EnginePeer.Id, gift: StarGift.Gift, text: String, includeUpgrade: Bool, preview: StarGiftUpgradePreview?, hasPremium: Bool = false, now: Int32, upgradeTemplate: StarGift.UniqueGift? = nil) -> VisualGramGiftPurchaseResult {
         guard gift.price > 0, gift.soldOut == nil, (gift.availability?.remains ?? 1) > 0,
               (gift.perUserLimit?.remains ?? 1) > 0, !gift.flags.contains(.isAuction),
               (gift.lockedUntilDate ?? 0) <= now else { return .unavailable }
@@ -159,7 +159,7 @@ public extension VisualGramLocalAppearance {
         guard !overflow, price > 0, price <= Int64(Int32.max) else { return .invalid }
         let purchased: StarGift
         if includeUpgrade {
-            guard let preview, let unique = Self.makeUpgradedGift(gift, preview: preview, ownerId: recipientPeerId) else { return .unavailable }
+            guard let preview, let unique = Self.makeUpgradedGift(gift, preview: preview, ownerId: recipientPeerId, template: upgradeTemplate) else { return .unavailable }
             purchased = .unique(unique)
         } else { purchased = .generic(gift) }
         var result: VisualGramGiftPurchaseResult = .invalid

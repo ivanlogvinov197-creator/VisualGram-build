@@ -126,9 +126,12 @@ public struct VisualGramGift: Codable, Equatable {
     public func displayGift(accountId: EnginePeer.Id) -> StarGift {
         guard case let .unique(gift) = self.gift else { return self.gift }
         let recipientId = self.direction == .sent ? (self.counterpartyId.map { EnginePeer.Id($0) } ?? accountId) : accountId
-        let senderId = self.nameHidden == true ? nil : (self.direction == .sent ? accountId : self.counterpartyId.map { EnginePeer.Id($0) })
         var attributes = gift.attributes.filter { $0.attributeType != .originalInfo }
-        if self.hidesOriginalInfo != true { attributes.append(.originalInfo(senderPeerId: senderId, recipientPeerId: recipientId, date: self.date, text: self.text.isEmpty ? nil : self.text, entities: self.textEntities)) }
+        // Captions stay in the message. Imported original-info rows must never
+        // invent a receipt or expose the server gift's previous participants.
+        if !self.text.isEmpty {
+            attributes.append(.originalInfo(senderPeerId: self.counterpartyId.map { EnginePeer.Id($0) }, recipientPeerId: recipientId, date: self.date, text: self.text, entities: self.textEntities))
+        }
         var prices: [CurrencyAmount] = []
         if let price = self.resaleStars, price > 0 { prices.append(CurrencyAmount(amount: StarsAmount(value: price, nanos: 0), currency: .stars)) }
         if let price = self.resaleGrams, price > 0 { prices.append(CurrencyAmount(amount: StarsAmount(value: price, nanos: 0), currency: .ton)) }

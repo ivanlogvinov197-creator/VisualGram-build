@@ -285,6 +285,8 @@ final class VisualGramCardEditorController: ViewController, UIGestureRecognizerD
     private var media: [String: WalletGiftStickerMedia] = [:]
     private var selected: String?
     private var renderedStickers: [WalletContext.CardSticker] = []
+    private var appliedBackground: String?
+    private var appliedPattern: UIImage?
     private var lastLayout: ContainerViewLayout?
     private lazy var pan = UIPanGestureRecognizer(target: self, action: #selector(self.panSticker(_:)))
     private lazy var pinch = UIPinchGestureRecognizer(target: self, action: #selector(self.pinchSticker(_:)))
@@ -311,7 +313,7 @@ final class VisualGramCardEditorController: ViewController, UIGestureRecognizerD
         self.help.numberOfLines = 0; self.help.font = .systemFont(ofSize: 15); self.help.textColor = theme.list.itemSecondaryTextColor
         self.view.addSubview(self.help)
         self.buttons.axis = .vertical; self.buttons.spacing = 12
-        for (index, title) in ["Фон", "Добавить наклейку", "Убрать выбранную наклейку"].enumerated() {
+        for (index, title) in ["Фон", "Добавить наклейку", "Убрать наклейку", "Сбросить карточку"].enumerated() {
             let button = UIButton(type: .system); button.setTitle(title, for: .normal); button.tag = index
             button.backgroundColor = theme.list.itemBlocksBackgroundColor; button.layer.cornerRadius = 12
             button.heightAnchor.constraint(equalToConstant: 48).isActive = true
@@ -320,7 +322,9 @@ final class VisualGramCardEditorController: ViewController, UIGestureRecognizerD
         }
         self.view.addSubview(self.buttons)
         for gesture in [self.pan, self.pinch, self.rotation, self.tap] { gesture.delegate = self }
-        self.pan.maximumNumberOfTouches = 2
+        self.view.disablesInteractiveTransitionGestureRecognizerNow = { true }
+        self.pan.maximumNumberOfTouches = 1
+        self.tap.require(toFail: self.pan)
     }
     override func containerLayoutUpdated(_ layout: ContainerViewLayout, transition: ContainedViewLayoutTransition) {
         super.containerLayoutUpdated(layout, transition: transition)
@@ -350,13 +354,17 @@ final class VisualGramCardEditorController: ViewController, UIGestureRecognizerD
         }
         cardView.setCardStickers(stickers, images: self.media.compactMapValues { $0.first?.image }, hidden: [])
         let selectedGift = self.selected.flatMap { id in self.draft.gifts.first(where: { $0.identifier == id }) }
-        let selectedAddress = selectedGift.flatMap { local -> String? in if case let .unique(gift) = local.gift { return "visualgram:" + gift.slug }; return nil }
+        let selectedAddress = selectedGift.map { VisualGramLocalAppearance.cardStickerAddress($0) }
         cardView.setStickerHint(stickers.first(where: { $0.gift.address == selectedAddress }), outline: nil)
         let background = stickers.last(where: { $0.style != nil })
-        cardView.setGiftStyle(from: background?.style, to: background?.style, origin: .zero, progress: 1, pattern: background.flatMap { self.media[$0.gift.address]?.patternImage })
-        self.help.frame = CGRect(x: left, y: cardView.frame.maxY + 20, width: width, height: 98)
-        self.buttons.frame = CGRect(x: left, y: self.help.frame.maxY + 16, width: width, height: 168)
-        self.buttons.arrangedSubviews.last?.isHidden = self.selected == nil
+        let pattern = background.flatMap { self.media[$0.gift.address]?.patternImage }
+        if self.appliedBackground != background?.gift.address || self.appliedPattern !== pattern {
+            self.appliedBackground = background?.gift.address; self.appliedPattern = pattern
+            cardView.setGiftStyle(from: background?.style, to: background?.style, origin: .zero, progress: 1, pattern: pattern)
+        }
+        self.help.frame = CGRect(x: left, y: cardView.frame.maxY + 20, width: width, height: 64)
+        self.buttons.frame = CGRect(x: left, y: self.help.frame.maxY + 16, width: width, height: 228)
+
     }
     private func pick(background: Bool) {
         let config = WalletConfiguration.with(appConfiguration: self.context.currentAppConfiguration.with { $0 })
@@ -380,10 +388,10 @@ final class VisualGramCardEditorController: ViewController, UIGestureRecognizerD
             }
             self.draft.gramCardGiftIds = ids
             if self.draft.gramCardPlacements?[id] == nil {
-                var positions = self.draft.gramCardPlacements ?? [:]; positions[id] = .init(x: 50, y: 64); self.draft.gramCardPlacements = positions
+                var positions = self.draft.gramCardPlacements ?? [:]; positions[id] = .init(x: 20 + Double((ids.count - 1) % 4) * 20, y: 74 - Double((ids.count - 1) / 4) * 24); self.draft.gramCardPlacements = positions
             }
             if background { self.draft.gramCardBackgroundId = id }
-            self.selected = id; self.render(); self.settleSticker()
+            self.selected = id; self.render()
             pickerToDismiss?.dismiss()
         })
         pickerToDismiss = picker
@@ -397,18 +405,43 @@ final class VisualGramCardEditorController: ViewController, UIGestureRecognizerD
             alert.addAction(UIAlertAction(title: "Сбросить фон", style: .destructive, handler: { [weak self] _ in self?.draft.gramCardBackgroundId = nil; self?.render() }))
             alert.addAction(UIAlertAction(title: "Отмена", style: .cancel)); self.present(alert, animated: true)
         case 1: self.pick(background: false)
+        case 2:
+            let alert = UIAlertController(title: "Убрать наклейку", message: nil, preferredStyle: .alert)
+            for id in self.draft.gramCardGiftIds ?? [] {
+                guard let local = self.draft.gifts.first(where: { $0.identifier == id }), case let .unique(gift) = local.gift else { continue }
+                alert.addAction(UIAlertAction(title: "\(gift.title) #\(gift.number)", style: .destructive, handler: { [weak self] _ in self?.removeSticker(id) }))
+            }
+            alert.addAction(UIAlertAction(title: "Отмена", style: .cancel)); self.present(alert, animated: true)
         default:
-            guard let id = self.selected else { return }
-            self.draft.gramCardGiftIds?.removeAll { $0 == id }; self.draft.gramCardPlacements?.removeValue(forKey: id)
-            if self.draft.gramCardBackgroundId == id { self.draft.gramCardBackgroundId = nil }
-            self.selected = nil; self.render()
+            let alert = UIAlertController(title: "Сбросить оформление карточки?", message: "Баланс и подарки сохранятся.", preferredStyle: .alert)
+            alert.addAction(UIAlertAction(title: "Сбросить", style: .destructive, handler: { [weak self] _ in
+                guard let self else { return }
+                VisualGramLocalAppearance.resetGramCard(in: &self.draft)
+                self.selected = nil; self.media.removeAll(); self.render()
+            }))
+            alert.addAction(UIAlertAction(title: "Отмена", style: .cancel)); self.present(alert, animated: true)
         }
     }
+    private func removeSticker(_ id: String) {
+        self.draft.gramCardGiftIds?.removeAll { $0 == id }; self.draft.gramCardPlacements?.removeValue(forKey: id)
+        if self.draft.gramCardBackgroundId == id { self.draft.gramCardBackgroundId = nil }
+        if self.selected == id { self.selected = nil }; self.render()
+    }
     private func hit(_ gesture: UIGestureRecognizer) -> String? {
-        guard let view = self.cardView, let sticker = view.sticker(at: gesture.location(in: view.stickerSurface)) else { return nil }
-        return self.draft.gifts.first(where: { gift in
-            if case let .unique(value) = gift.gift { return "visualgram:" + value.slug == sticker.gift.address }; return false
-        })?.identifier
+        guard let view = self.cardView else { return nil }
+        let surface = view.stickerSurface, point = gesture.location(in: surface)
+        // The native viewer excludes its diamond/QR from hit testing. The editor
+        // must still let users recover a sticker placed over either control.
+        for sticker in self.renderedStickers.reversed() {
+            let dx = point.x - CGFloat(sticker.x) * surface.bounds.width
+            let dy = point.y - CGFloat(sticker.y) * surface.bounds.height
+            let angle = CGFloat(sticker.angle), radius = max(22, surface.bounds.width * CGFloat(sticker.renderedWidthFraction) / 2)
+            let x = dx * cos(angle) + dy * sin(angle), y = -dx * sin(angle) + dy * cos(angle)
+            if abs(x) <= radius, abs(y) <= radius {
+                return self.draft.gifts.first(where: { VisualGramLocalAppearance.cardStickerAddress($0) == sticker.gift.address })?.identifier
+            }
+        }
+        return nil
     }
     func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
         if gestureRecognizer === self.pan || gestureRecognizer === self.tap {
@@ -428,25 +461,14 @@ final class VisualGramCardEditorController: ViewController, UIGestureRecognizerD
         var value = positions[id] ?? .init(x: 20 + Double(index % 4) * 20, y: 74 - Double(index / 4) * 24)
         change(&value); positions[id] = value.normalized; self.draft.gramCardPlacements = positions; self.render()
     }
-    private func settleSticker() {
-        guard let id = self.selected, let view = self.cardView,
-              let value = self.draft.gramCardPlacements?[id] else { return }
-        let address = self.draft.gifts.first(where: { $0.identifier == id }).flatMap { local -> String? in if case let .unique(gift) = local.gift { return "visualgram:" + gift.slug }; return nil }
-        let solver = WalletStickerPlacement(size: view.stickerSurface.bounds.size, obstacles: view.stickerObstacles, occupants: self.renderedStickers.filter { $0.gift.address != address })
-        let aim = CGPoint(x: CGFloat(value.x / 100) * solver.size.width, y: CGFloat(value.y / 100) * solver.size.height)
-        if let spot = solver.drop(near: aim, scale: CGFloat(value.scale)) {
-            self.modify { $0.x = Double(spot.center.x / solver.size.width) * 100; $0.y = Double(spot.center.y / solver.size.height) * 100; $0.scale = Double(spot.scale) }
-        }
-    }
     @objc private func selectSticker(_ gesture: UITapGestureRecognizer) { self.selected = self.hit(gesture); self.render() }
     @objc private func panSticker(_ gesture: UIPanGestureRecognizer) {
         guard let surface = self.cardView?.stickerSurface, surface.bounds.width > 0, surface.bounds.height > 0 else { return }
         let delta = gesture.translation(in: surface); gesture.setTranslation(.zero, in: surface)
         self.modify { $0.x += Double(delta.x / surface.bounds.width) * 100; $0.y += Double(delta.y / surface.bounds.height) * 100 }
-        if gesture.state == .ended { self.settleSticker() }
     }
-    @objc private func pinchSticker(_ gesture: UIPinchGestureRecognizer) { let scale = Double(gesture.scale); gesture.scale = 1; self.modify { $0.scale *= scale }; if gesture.state == .ended && self.rotation.state != .changed { self.settleSticker() } }
-    @objc private func rotateSticker(_ gesture: UIRotationGestureRecognizer) { let angle = Double(gesture.rotation) * 180 / .pi; gesture.rotation = 0; self.modify { $0.angle += angle }; if gesture.state == .ended && self.pinch.state != .changed { self.settleSticker() } }
+    @objc private func pinchSticker(_ gesture: UIPinchGestureRecognizer) { let scale = Double(gesture.scale); gesture.scale = 1; self.modify { $0.scale *= scale } }
+    @objc private func rotateSticker(_ gesture: UIRotationGestureRecognizer) { let angle = Double(gesture.rotation) * 180 / .pi; gesture.rotation = 0; self.modify { $0.angle += angle } }
     @objc private func cancel() { self.dismiss() }
     @objc private func save() {
         var saved = false

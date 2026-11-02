@@ -15,10 +15,13 @@ public extension VisualGramLocalAppearance {
         self.update(accountId: accountId) { value in
             guard let index = value.gifts.firstIndex(where: { $0.reference(accountId: accountId) == reference && $0.direction == .received && $0.isHistoryOnly != true && $0.isCrafted != true }),
                   case let .unique(existing) = value.gifts[index].gift,
-                  existing.slug == gift.slug, existing.giftId == gift.giftId else { return }
+                  (existing.slug == gift.slug || (existing.id < 0 && UUID(uuidString: String(existing.slug.dropFirst(5))) != nil)), existing.giftId == gift.giftId else { return }
             // Refresh catalog metadata only. Keep local receipt, ownership, order,
             // sale price and any separate locally configured unlock date.
-            value.gifts[index].gift = .unique(gift)
+            guard !value.gifts.contains(where: { $0.identifier != value.gifts[index].identifier && $0.direction == .received && $0.isHistoryOnly != true && $0.assetIdentifier == "unique:" + gift.slug }) else { return }
+            if existing.id < 0 {
+                value.gifts[index].gift = .unique(StarGift.UniqueGift(id: existing.id, giftId: gift.giftId, title: gift.title, number: gift.number, slug: gift.slug, owner: existing.owner, attributes: gift.attributes.filter { $0.attributeType != .originalInfo }, availability: gift.availability, giftAddress: nil, resellAmounts: nil, resellForTonOnly: false, releasedBy: gift.releasedBy, valueAmount: gift.valueAmount, valueCurrency: gift.valueCurrency, valueUsdAmount: gift.valueUsdAmount, flags: gift.flags, themePeerId: gift.themePeerId, peerColor: gift.peerColor, hostPeerId: nil, minOfferStars: nil, craftChancePermille: gift.craftChancePermille))
+            } else { value.gifts[index].gift = .unique(gift) }
         }
     }
     func craftableLocalGifts(accountId: EnginePeer.Id, giftId: Int64, now: Int32) -> [VisualGramGift] {
