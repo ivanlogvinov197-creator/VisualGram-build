@@ -41,7 +41,7 @@ public enum StarGift: Codable, Equatable {
         public enum Owner: Codable, Equatable { case peerId(EnginePeer.Id) }
         public struct Availability: Codable, Equatable { let issued: Int32; let total: Int32 }
         public enum Attribute: Codable, Equatable {
-            public enum AttributeType { case model, pattern, backdrop }
+            public enum AttributeType { case model, pattern, backdrop, originalInfo }
             case model(String, Int, Int32, Bool), pattern(Int), backdrop(Int)
             static func model(_ id: Int) -> Self { .model("Model", id, 1, false) }
             var attributeType: AttributeType {

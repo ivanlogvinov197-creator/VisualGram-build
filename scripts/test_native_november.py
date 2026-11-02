@@ -176,6 +176,37 @@ assert(senderStore.editGiftDetails(accountId: a, targetPeerId: b, identifier: ou
 assert(senderStore.appearance(accountId: b).gifts.count == 1 && senderStore.appearance(accountId: b).gifts.first?.direction == .received, "editing sender to self replaced ownership with outgoing history")
 assert(senderStore.appearance(accountId: a).gifts.isEmpty)
 
+// A supported regular gift remains craftable after its local upgrade.
+let upgradedCollection = nft(704, chance: 220)
+let regular = StarGift.Gift(id: 42, title: "Cake", availability: .init(total: 1000), releasedBy: nil)
+let preview = StarGiftUpgradePreview(attributes: [.model(1), .pattern(2), .backdrop(3)])
+let upgraded = VisualGramLocalAppearance.makeUpgradedGift(regular, preview: preview, ownerId: a, template: upgradedCollection)!
+assert(upgraded.slug == upgradedCollection.slug && upgraded.number == upgradedCollection.number && upgraded.craftChancePermille == 220)
+assert(!upgraded.slug.contains("-0000-"))
+let upgradedStore = VisualGramLocalAppearance()
+let upgradedLocal = VisualGramGift(gift: .unique(upgraded), counterpartyId: nil, date: 100, text: "caption")
+upgradedStore.values["10"] = .init(enabled: true, gifts: [upgradedLocal])
+assert(upgradedStore.craftableLocalGifts(accountId: a, giftId: 42, now: 1000).count == 1)
+let upgradedReference = upgradedLocal.reference(accountId: a)
+if case .success = upgradedStore.craftLocalGifts(accountId: a, references: [upgradedReference], attributes: attributes, attributePermilles: probabilities, now: 1000, random: { _ in 0 }) {} else { assertionFailure("local upgrade could not craft") }
+// Repair saved UUID gifts in place, preserving identity, caption and ownership.
+var legacyUpgrade = VisualGramLocalAppearance.makeUpgradedGift(regular, preview: preview, ownerId: a)!
+legacyUpgrade = .init(id: legacyUpgrade.id, giftId: 42, title: "Cake", number: 2, slug: "Gift-54941C57-D6A3-4134-9865-18E63E8378DF", owner: .peerId(a), attributes: legacyUpgrade.attributes, availability: legacyUpgrade.availability, giftAddress: nil, resellAmounts: nil, resellForTonOnly: false, releasedBy: nil, valueAmount: nil, valueCurrency: nil, valueUsdAmount: nil, flags: [], themePeerId: nil, peerColor: nil, hostPeerId: nil, minOfferStars: nil, craftChancePermille: nil)
+let legacyLocal = VisualGramGift(gift: .unique(legacyUpgrade), counterpartyId: 20, date: 100, text: "kept")
+let repairStore = VisualGramLocalAppearance(); repairStore.values["10"] = .init(enabled: true, gifts: [legacyLocal])
+repairStore.updateLocalCraftMetadata(accountId: a, reference: legacyLocal.reference(accountId: a), gift: upgradedCollection)
+assert(repairStore.appearance(accountId: a).gifts[0].identifier == legacyLocal.identifier)
+assert(repairStore.appearance(accountId: a).gifts[0].text == "kept" && repairStore.appearance(accountId: a).gifts[0].craftChance == 220)
+if case let .unique(repaired) = repairStore.appearance(accountId: a).gifts[0].gift { assert(repaired.id == legacyUpgrade.id && repaired.slug == upgradedCollection.slug) }
+var resetCard = VisualGramAppearance(enabled: true, gifts: [first], stars: 123)
+resetCard.grams = 999; resetCard.gramCardGiftIds = [first.identifier]; resetCard.gramCardBackgroundId = first.identifier
+resetCard.gramCardPlacements = [first.identifier: .init(x: 50, y: 50)]
+VisualGramLocalAppearance.resetGramCard(in: &resetCard)
+assert(resetCard.gifts == [first] && resetCard.stars == 123 && resetCard.grams == 999)
+assert(resetCard.gramCardGiftIds == [] && resetCard.gramCardBackgroundId == nil && resetCard.gramCardPlacements?.isEmpty == true)
+var secondCopy = first; secondCopy.localIdentifier = "another-copy"
+assert(VisualGramLocalAppearance.cardStickerAddress(first) != VisualGramLocalAppearance.cardStickerAddress(secondCopy), "two local copies shared sticker hit-test identity")
+
 print("PASS: GRAM precision/overflow, strict quote currency, debit/history, duplicate/insufficient balance, persistence; craft success/failure/consumption, retained history, unlock date, owner and replay guards")
 '''
 
