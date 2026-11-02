@@ -113,6 +113,15 @@ assert(orderStore.appearance(accountId: a).giftOrder == [first.identifier, secon
 assert(!orderStore.saveGiftOrder(accountId: a, targetPeerId: a, identifiers: [first.identifier, first.identifier]))
 orderStore.values["10"]?.gifts.append(VisualGramGift(gift: .unique(nft(99)), counterpartyId: nil, date: 100, text: ""))
 assert(!orderStore.saveGiftOrder(accountId: a, targetPeerId: a, identifiers: [first.identifier, second.identifier]), "stale editor overwrote a new gift")
+let clones = VisualGramLocalAppearance()
+let ownClone = VisualGramGift(gift: .unique(nft(77)), counterpartyId: nil, date: 100, text: "")
+let otherClone = VisualGramGift(gift: .unique(nft(77)), counterpartyId: nil, date: 100, text: "")
+clones.values["10"] = .init(enabled: true, gifts: [ownClone])
+clones.values["20"] = .init(enabled: true, gifts: [otherClone])
+assert(clones.localCraftReference(accountId: a, gift: nft(77)) == ownClone.reference(accountId: a))
+assert(clones.localCraftReference(accountId: b, gift: nft(77)) == otherClone.reference(accountId: b))
+clones.values["10"]?.gifts[0].isHistoryOnly = true
+assert(clones.localCraftReference(accountId: a, gift: nft(77)) == nil, "craft fell back to another profile's duplicate")
 let metadata = VisualGramLocalAppearance()
 var legacy = VisualGramGift(gift: .unique(nft(55, chance: nil)), counterpartyId: 20, date: 123, text: "local text")
 legacy.resaleStars = 200

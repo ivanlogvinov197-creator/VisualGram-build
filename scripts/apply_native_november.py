@@ -70,7 +70,7 @@ def apply_november(root, project):
 ''')
     gifts.write_text(text[:start] + part + text[end:], encoding='utf-8')
     craft = ui / 'Gifts/GiftCraftScreen/Sources/GiftCraftScreen.swift'
-    replace(craft, 'let craftContext = CraftGiftsContext(account: context.account, giftId: gift.giftId)', 'let local = VisualGramLocalAppearance.shared.localReference(slug: gift.slug).map { VisualGramLocalAppearance.shared.canManageLocalGift(accountId: context.account.peerId, reference: $0) } ?? false\n        let craftContext = CraftGiftsContext(account: context.account, giftId: gift.giftId, visualGramLocal: local)')
+    replace(craft, 'let craftContext = CraftGiftsContext(account: context.account, giftId: gift.giftId)', 'let local = VisualGramLocalAppearance.shared.localCraftReference(accountId: context.account.peerId, gift: gift) != nil\n        let craftContext = CraftGiftsContext(account: context.account, giftId: gift.giftId, visualGramLocal: local)')
     replace(craft, 'craftContext.craft(references: references)', 'craftContext.craft(references: references, visualGramAttributePermilles: GiftCraftConfiguration.with(appConfiguration: component.context.currentAppConfiguration.with { $0 }).craftAttributePermilles)')
     # Local consumption and insertion are already committed atomically by the
     # local store. Native optimistic cache updates would delete its history and
