@@ -17,7 +17,8 @@ def source():
     removals = management[management.index('    func removeLocalGifts('):management.index('    func reorderGifts(')]
     trading = (root / 'native/VisualGramGiftTrading.swift').read_text(encoding='utf-8')
     trading = trading[:trading.index('    func localMarketState(')] + '}\n'
-    return STUBS + model + STORE + reference + imports + upgraded + removals + visibility + '}\n' + trading + CHECKS + PURCHASE_CHECKS + REMOVAL_CHECKS + SELLER_CHECKS
+    reordering = management[management.index('    @discardableResult\n    func saveGiftOrder('):management.index('    func chatGifts(')]
+    return STUBS + model + STORE + reordering + reference + imports + upgraded + removals + visibility + '}\n' + trading + CHECKS + PURCHASE_CHECKS + REMOVAL_CHECKS + SELLER_CHECKS
 
 
 STORE = r'''
@@ -32,6 +33,7 @@ public struct VisualGramAppearance: Codable {
     var giftOrder: [String]?
     var gramCardGiftIds: [String]?
     var gramCardBackgroundId: String?
+    var gramCardPlacements: [String: VisualGramGift.CardPlacement]?
     var stars: Int64?
     var giftPurchaseCounts: [String: Int32]?
     var starsHistory: [VisualGramGift.StarsTransaction]?

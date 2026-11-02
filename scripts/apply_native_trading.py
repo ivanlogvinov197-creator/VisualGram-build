@@ -24,8 +24,8 @@ def apply_trading(root):
 ''')
     signature = 'func _internal_updateStarGiftResalePrice(account: Account, reference: StarGiftReference, price: CurrencyAmount?) -> Signal<Never, UpdateStarGiftPriceError> {\n'
     replace(core, signature, signature + '''    if VisualGramLocalAppearance.isLocalReference(reference) {
-        guard price == nil || price?.currency == .stars else { return .fail(.generic) }
-        return VisualGramLocalAppearance.shared.listLocalGift(accountId: account.peerId, reference: reference, price: price?.amount.value) ? .complete() : .fail(.generic)
+        guard price == nil || (price?.currency == .stars || price?.currency == .ton) else { return .fail(.generic) }
+        return VisualGramLocalAppearance.shared.listLocalGift(accountId: account.peerId, reference: reference, price: price?.amount.value, currency: price?.currency ?? .stars) ? .complete() : .fail(.generic)
     }
 ''')
     # Scope these replacements to the public resale context, not other contexts with similar state APIs.
@@ -37,8 +37,8 @@ def apply_trading(root):
     resale = resale.replace('        self.forCrafting = forCrafting\n', '        self.visualGramAccount = account\n        self.visualGramGiftId = giftId\n        self.forCrafting = forCrafting\n', 1)
     resale = resale.replace('    public func updateStarGiftResellPrice(slug: String, price: CurrencyAmount?) -> Signal<Never, UpdateStarGiftPriceError> {\n', '''    public func updateStarGiftResellPrice(slug: String, price: CurrencyAmount?) -> Signal<Never, UpdateStarGiftPriceError> {
         if let reference = VisualGramLocalAppearance.shared.localReference(slug: slug) {
-            guard price == nil || price?.currency == .stars else { return .fail(.generic) }
-            return VisualGramLocalAppearance.shared.listLocalGift(accountId: self.visualGramAccount.peerId, reference: reference, price: price?.amount.value) ? .complete() : .fail(.generic)
+            guard price == nil || (price?.currency == .stars || price?.currency == .ton) else { return .fail(.generic) }
+            return VisualGramLocalAppearance.shared.listLocalGift(accountId: self.visualGramAccount.peerId, reference: reference, price: price?.amount.value, currency: price?.currency ?? .stars) ? .complete() : .fail(.generic)
         }
 ''', 1)
     resale = resale.replace('        return state\n    }\n}', '        return state.map { VisualGramLocalAppearance.shared.localMarketState($0, giftId: self.visualGramGiftId, accountId: self.visualGramAccount.peerId, forCrafting: self.forCrafting) }\n    }\n}', 1)

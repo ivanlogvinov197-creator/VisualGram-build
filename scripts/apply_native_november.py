@@ -10,9 +10,10 @@ def apply_november(root, project):
         shutil.copyfile(project / 'native' / name, core / name)
     peer_module = ui / 'PeerInfo/PeerInfoScreen'
     shutil.copyfile(project / 'native/VisualGramGiftGridController.swift', peer_module / 'Sources/VisualGramGiftGridController.swift')
+    shutil.copyfile(ui / 'Wallet/WalletScreen/Sources/WalletStickerPlacement.swift', peer_module / 'Sources/VisualGramWalletStickerPlacement.swift')
     build = peer_module / 'BUILD'
     build_text = build.read_text(encoding='utf-8')
-    for dependency in ['//submodules/TelegramUI/Components/Gifts/GiftItemComponent', '//submodules/TelegramUI/Components/Settings/BusinessHoursSetupScreen', '//submodules/TelegramUI/Components/Settings/BusinessLocationSetupScreen']:
+    for dependency in ['//submodules/TelegramUI/Components/Gifts/GiftItemComponent', '//submodules/TelegramUI/Components/Gifts/GiftCraftScreen', '//submodules/TelegramUI/Components/Wallet/WalletCardComponent', '//submodules/TelegramUI/Components/Wallet/WalletGiftStickerMediaComponent', '//submodules/WalletContext', '//submodules/TelegramUI/Components/Settings/BusinessHoursSetupScreen', '//submodules/TelegramUI/Components/Settings/BusinessLocationSetupScreen']:
         if '"' + dependency + '"' not in build_text:
             build_text = build_text.replace('    deps = [\n', '    deps = [\n        "' + dependency + '",\n', 1)
     build.write_text(build_text, encoding='utf-8')
@@ -54,6 +55,19 @@ def apply_november(root, project):
 '''.replace('timeIntervalSince1970))))', 'timeIntervalSince1970)))'))
     for signature in ['loadMore()', 'reload()', 'removeGifts(references: [StarGiftReference])']:
         change('    public func ' + signature + ' {\n', '    public func ' + signature + ' {\n        if self.visualGramLocal { return }\n')
+    change('    private let impl: QueueLocalObject<CraftGiftsContextImpl>\n', '    private let impl: QueueLocalObject<CraftGiftsContextImpl>\n    private let visualGramMetadata = DisposableSet()\n')
+    change('    public func loadMore() {\n', '    deinit { self.visualGramMetadata.dispose() }\n\n    public func loadMore() {\n')
+    change('            return CraftGiftsContextImpl(queue: queue, account: account, giftId: giftId, limit: limit)\n        })\n', '''            return CraftGiftsContextImpl(queue: queue, account: account, giftId: giftId, limit: limit)
+        })
+        if visualGramLocal {
+            for local in VisualGramLocalAppearance.shared.appearance(accountId: account.peerId).gifts where local.direction == .received && local.isHistoryOnly != true && local.isCrafted != true {
+                guard case let .unique(gift) = local.gift, gift.giftId == giftId else { continue }
+                self.visualGramMetadata.add((_internal_getUniqueStarGift(account: account, slug: gift.slug) |> deliverOnMainQueue).start(next: { fresh in
+                    VisualGramLocalAppearance.shared.updateLocalCraftMetadata(accountId: account.peerId, reference: local.reference(accountId: account.peerId), gift: fresh)
+                }))
+            }
+        }
+''')
     gifts.write_text(text[:start] + part + text[end:], encoding='utf-8')
     craft = ui / 'Gifts/GiftCraftScreen/Sources/GiftCraftScreen.swift'
     replace(craft, 'let craftContext = CraftGiftsContext(account: context.account, giftId: gift.giftId)', 'let local = VisualGramLocalAppearance.shared.localReference(slug: gift.slug).map { VisualGramLocalAppearance.shared.canManageLocalGift(accountId: context.account.peerId, reference: $0) } ?? false\n        let craftContext = CraftGiftsContext(account: context.account, giftId: gift.giftId, visualGramLocal: local)')
@@ -65,6 +79,28 @@ def apply_november(root, project):
     replace(craft, '                                        controller.profileGiftsContext?.insertStarGifts(gifts: [gift], afterPinned: true)\n', '                                        if !component.craftContext.visualGramLocal { controller.profileGiftsContext?.insertStarGifts(gifts: [gift], afterPinned: true) }\n')
     view = ui / 'Gifts/GiftViewScreen/Sources/GiftViewScreen.swift'
     replace(view, '        func craftGift() {\n', '        func craftGift() {\n            if VisualGramLocalAppearance.isLocalReference(self.subject.arguments?.reference), !VisualGramLocalAppearance.shared.canManageLocalGift(accountId: self.context.account.peerId, reference: self.subject.arguments?.reference) { return }\n')
+
+    replace(view, '        var justUpgraded = false\n', '        var justUpgraded = false\n        private let visualGramMetadata = MetaDisposable()\n')
+    replace(view, '            self.getController = getController\n            \n            super.init()\n', '''            self.getController = getController
+            
+            super.init()
+            if case let .profileGift(peerId, localProfile) = subject,
+               let reference = localProfile.reference,
+               VisualGramLocalAppearance.isLocalReference(reference),
+               case let .unique(gift) = localProfile.gift,
+               VisualGramLocalAppearance.shared.localGift(accountId: peerId, reference: reference)?.isCrafted != true {
+                self.visualGramMetadata.set((context.engine.payments.getUniqueStarGift(slug: gift.slug) |> deliverOnMainQueue).start(next: { [weak self] fresh in
+                    guard let self else { return }
+                    VisualGramLocalAppearance.shared.updateLocalCraftMetadata(accountId: peerId, reference: reference, gift: fresh)
+                    guard let local = VisualGramLocalAppearance.shared.localGift(accountId: peerId, reference: reference), local.direction == .received, local.isHistoryOnly != true else { return }
+                    self.subject = .profileGift(peerId, local.profileGift(accountId: peerId, sender: localProfile.fromPeer))
+                    self.updated()
+                }))
+            }
+''')
+    # The header previously read the initial subject rather than refreshed state.
+    replace(view, 'if let _ = component.subject.arguments?.canCraftDate {', 'if let _ = state.subject.arguments?.canCraftDate {')
+    replace(view, '            self.upgradePreviewDisposable.dispose()\n', '            self.upgradePreviewDisposable.dispose()\n            self.visualGramMetadata.dispose()\n')
 
     # Build a display copy of cached profile data. No Postbox or account update.
     peer = ui / 'PeerInfo/PeerInfoScreen/Sources/PeerInfoScreen.swift'

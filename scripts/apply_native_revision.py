@@ -41,6 +41,16 @@ def apply_revision(root):
                     }
                     if peerView.peerId.namespace == Namespaces.Peer.SecretChat {
 ''')
+    # Recreate the animated status layer when switching between emoji and NFT.
+    # Reusing the same media view can leave its previous animation on screen.
+    replace(title, '        private var statusIcon: ComponentView<Empty>?\n', '        private var statusIcon: ComponentView<Empty>?\n        private var visualGramStatus: PeerEmojiStatus?\n')
+    replace(title, '                        if local.overridesEmojiStatus, !hidePeerStatus {\n', '''                        if local.overridesEmojiStatus, !hidePeerStatus {
+                            if self.visualGramStatus != local.emojiStatus {
+                                self.statusIcon?.view?.removeFromSuperview()
+                                self.statusIcon = nil
+                                self.visualGramStatus = local.emojiStatus
+                            }
+''')
     # Force a navigation-bar layout when only local presentation changes. Parent
     # ContentData/Component equality intentionally ignores server-unchanged peers.
     replace(title, '    private let parentTitleState = ComponentState()\n', '    private let parentTitleState = ComponentState()\n    private let visualGramNavigationDisposable = MetaDisposable()\n    private var visualGramContext: AccountContext?\n')
