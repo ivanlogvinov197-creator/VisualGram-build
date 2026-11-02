@@ -104,6 +104,8 @@ assert(Set(eligibility.craftableLocalGifts(accountId: a, giftId: 42, now: 5000).
 let layout = VisualGramGift.CardPlacement(x: .infinity, y: -40, scale: .nan, angle: .infinity).normalized
 assert(layout.x == 50 && layout.y == 0 && layout.scale == 1 && layout.angle == 0)
 let orderStore = VisualGramLocalAppearance()
+var newer = second; newer.date = first.date + 10
+assert(VisualGramLocalAppearance.orderedOwnedGifts(in: .init(enabled: true, gifts: [first, newer])).map { $0.identifier } == [second.identifier, first.identifier], "default order disagrees with native profile")
 var pinned = first; pinned.pinnedToTop = true
 orderStore.values["10"] = .init(enabled: true, gifts: [pinned, second])
 assert(orderStore.saveGiftOrder(accountId: a, targetPeerId: a, identifiers: [second.identifier, first.identifier]))

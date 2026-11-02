@@ -17,7 +17,7 @@ def source():
     removals = management[management.index('    func removeLocalGifts('):management.index('    func reorderGifts(')]
     trading = (root / 'native/VisualGramGiftTrading.swift').read_text(encoding='utf-8')
     trading = trading[:trading.index('    func localMarketState(')] + '}\n'
-    reordering = management[management.index('    @discardableResult\n    func saveGiftOrder('):management.index('    func chatGifts(')]
+    reordering = management[management.index('    static func orderedOwnedGifts('):management.index('    func chatGifts(')]
     return STUBS + model + STORE + reordering + reference + imports + upgraded + removals + visibility + '}\n' + trading + CHECKS + PURCHASE_CHECKS + REMOVAL_CHECKS + SELLER_CHECKS
 
 
