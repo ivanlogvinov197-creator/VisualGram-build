@@ -3,6 +3,14 @@ import Foundation
 public enum VisualGramCraftResult { case success(VisualGramGift), failure(CraftStarGiftError) }
 
 public extension VisualGramLocalAppearance {
+    func localCraftReference(accountId: EnginePeer.Id, gift: StarGift.UniqueGift) -> StarGiftReference? {
+        let value = self.appearance(accountId: accountId)
+        guard value.enabled else { return nil }
+        return value.gifts.first(where: { local in
+            guard local.direction == .received, local.isHistoryOnly != true, case let .unique(unique) = local.gift else { return false }
+            return unique.slug == gift.slug
+        })?.reference(accountId: accountId)
+    }
     func updateLocalCraftMetadata(accountId: EnginePeer.Id, reference: StarGiftReference, gift: StarGift.UniqueGift) {
         self.update(accountId: accountId) { value in
             guard let index = value.gifts.firstIndex(where: { $0.reference(accountId: accountId) == reference && $0.direction == .received && $0.isHistoryOnly != true && $0.isCrafted != true }),
