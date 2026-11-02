@@ -33,6 +33,19 @@ public struct VisualGramUsername: Codable, Equatable {
 }
 
 public struct VisualGramGift: Codable, Equatable {
+    public struct CardPlacement: Codable, Equatable {
+        public var x: Double
+        public var y: Double
+        public var scale: Double
+        public var angle: Double
+        public init(x: Double, y: Double, scale: Double = 1, angle: Double = 0) {
+            self.x = x.isFinite ? min(100, max(0, x)) : 50
+            self.y = y.isFinite ? min(100, max(0, y)) : 50
+            self.scale = scale.isFinite ? min(1.1, max(32.0 / 83.4, scale)) : 1
+            self.angle = angle.isFinite ? angle.truncatingRemainder(dividingBy: 360) : 0
+        }
+        public var normalized: CardPlacement { CardPlacement(x: self.x, y: self.y, scale: self.scale, angle: self.angle) }
+    }
     public struct StarsTransaction: Codable, Equatable {
         public enum Kind: String, Codable { case topUp, purchase, sale, transfer, adjustment }
         public var id: String
@@ -68,6 +81,7 @@ public struct VisualGramGift: Codable, Equatable {
     public var isHistoryOnly: Bool?
     public var isTransferred: Bool?
     public var resaleStars: Int64?
+    public var resaleGrams: Int64?
     public var purchaseStars: Int64?
     public var purchaseBuyerId: Int64?
     public var purchaseGrams: Int64?
@@ -109,8 +123,10 @@ public struct VisualGramGift: Codable, Equatable {
         let senderId = self.direction == .sent ? accountId : self.counterpartyId.map { EnginePeer.Id($0) }
         var attributes = gift.attributes.filter { $0.attributeType != .originalInfo }
         if self.hidesOriginalInfo != true { attributes.append(.originalInfo(senderPeerId: senderId, recipientPeerId: recipientId, date: self.date, text: self.text.isEmpty ? nil : self.text, entities: nil)) }
-            let prices = self.resaleStars.map { [CurrencyAmount(amount: StarsAmount(value: $0, nanos: 0), currency: .stars)] }
-        return .unique(StarGift.UniqueGift(id: gift.id, giftId: gift.giftId, title: gift.title, number: gift.number, slug: gift.slug, owner: .peerId(recipientId), attributes: attributes, availability: gift.availability, giftAddress: nil, resellAmounts: prices, resellForTonOnly: false, releasedBy: gift.releasedBy, valueAmount: gift.valueAmount, valueCurrency: gift.valueCurrency, valueUsdAmount: gift.valueUsdAmount, flags: gift.flags, themePeerId: gift.themePeerId, peerColor: gift.peerColor, hostPeerId: nil, minOfferStars: nil, craftChancePermille: gift.craftChancePermille))
+        var prices: [CurrencyAmount] = []
+        if let price = self.resaleStars, price > 0 { prices.append(CurrencyAmount(amount: StarsAmount(value: price, nanos: 0), currency: .stars)) }
+        if let price = self.resaleGrams, price > 0 { prices.append(CurrencyAmount(amount: StarsAmount(value: price, nanos: 0), currency: .ton)) }
+        return .unique(StarGift.UniqueGift(id: gift.id, giftId: gift.giftId, title: gift.title, number: gift.number, slug: gift.slug, owner: .peerId(recipientId), attributes: attributes, availability: gift.availability, giftAddress: nil, resellAmounts: prices.isEmpty ? nil : prices, resellForTonOnly: self.resaleGrams != nil && self.resaleStars == nil, releasedBy: gift.releasedBy, valueAmount: gift.valueAmount, valueCurrency: gift.valueCurrency, valueUsdAmount: gift.valueUsdAmount, flags: gift.flags, themePeerId: gift.themePeerId, peerColor: gift.peerColor, hostPeerId: nil, minOfferStars: nil, craftChancePermille: gift.craftChancePermille))
     }
 
     public func profileGift(accountId: EnginePeer.Id, sender: EnginePeer?) -> ProfileGiftsContext.State.StarGift {
@@ -138,6 +154,7 @@ public struct VisualGramAppearance: Codable, Equatable {
     public var gramHistory: [VisualGramGift.StarsTransaction]?
     public var gramCardGiftIds: [String]?
     public var gramCardBackgroundId: String?
+    public var gramCardPlacements: [String: VisualGramGift.CardPlacement]?
     public var overridesProfileStyle: Bool?
     public var profileColor: Int32?
     public var profileBackgroundEmojiId: Int64?

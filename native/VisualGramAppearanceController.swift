@@ -8,6 +8,7 @@ import ItemListUI
 import AccountContext
 import GiftOptionsScreen
 import GiftViewScreen
+import GiftCraftScreen
 import EntityKeyboard
 import EmojiStatusSelectionComponent
 import ChatScheduleTimeController
@@ -49,8 +50,8 @@ private final class VisualGramAppearanceActions {
     let context: AccountContext
     weak var controller: ItemListController?
     let disposables = DisposableSet()
-    let activeSection = ValuePromise<Int32>(0, ignoreRepeated: true)
-    let expandedLists = ValuePromise<Int32>(0, ignoreRepeated: true)
+    let activeSection = ValuePromise<Int32>(-1, ignoreRepeated: true)
+    let expandedLists = ValuePromise<Int32>(-1, ignoreRepeated: true)
     private var expandedListBits: Int32 = 0
     var targetPeerId: EnginePeer.Id
     var targetTitle = "Мой профиль"
@@ -166,19 +167,21 @@ private final class VisualGramAppearanceActions {
         case 16:
             self.controller?.push(BusinessLocationSetupScreen(context: self.context, initialValue: self.appearance.businessLocation, completion: { _ in }, visualGramTarget: self.targetPeerId))
         case 27: self.openGrid()
+        case 28: self.openCrafts()
+        case 903: self.activeSection.set(-1)
         case 32:
-            self.form(title: "Баланс GRAM", fields: [("GRAM", self.appearance.grams.map { VisualGramLocalAppearance.formatGrams($0) } ?? ""), ("Звёзд за 1 GRAM", self.appearance.gramStarsPerUnit.map(String.init) ?? "")]) { [weak self] values in
-                guard let self, values.count == 2 else { return }
+            self.form(title: "Баланс GRAM", fields: [("GRAM", self.appearance.grams.map { VisualGramLocalAppearance.formatGrams($0) } ?? "")]) { [weak self] values in
+                guard let self, values.count == 1 else { return }
                 if values[0].isEmpty { self.update { $0.grams = nil }; return }
-                guard let balance = VisualGramLocalAppearance.parseGrams(values[0]), let rate = Int64(values[1]), rate > 0 else { self.message("Проверь баланс и курс. Для GRAM можно указать до 9 знаков после запятой."); return }
+                guard let balance = VisualGramLocalAppearance.parseGrams(values[0]) else { self.message("Введите баланс: до 9 знаков после запятой."); return }
                 self.update {
                     let delta = balance - ($0.grams ?? 0)
                     var history = $0.gramHistory ?? []
                     if delta != 0 { history.append(.init(id: UUID().uuidString, date: Int32(clamping: Int64(Date().timeIntervalSince1970)), amount: delta, kind: delta > 0 ? .topUp : .adjustment, title: nil, peerId: nil, gift: nil)) }
-                    $0.grams = balance; $0.gramStarsPerUnit = rate; $0.gramHistory = history; $0.enabled = true
+                    $0.grams = balance; $0.gramHistory = history; $0.enabled = true
                 }
             }
-        case 33: self.openGrid(cardMode: true)
+        case 33: self.controller?.push(VisualGramCardEditorController(context: self.context, target: self.targetPeerId))
         case 30:
             self.form(title: "Баланс звёзд", fields: [("Баланс", self.appearance.stars.map(String.init) ?? "")]) { [weak self] values in
                 guard let self, values.count == 1 else { return }
@@ -470,8 +473,38 @@ private final class VisualGramAppearanceActions {
         self.presentNative(alert)
     }
 
-    private func openGrid(cardMode: Bool = false) {
-        self.controller?.push(VisualGramGiftGridController(context: self.context, target: self.targetPeerId, cardMode: cardMode, openGift: { [weak self] id in
+    private func openCrafts() {
+        guard self.targetPeerId == self.context.account.peerId else { self.message("Для крафта переключись на аккаунт владельца подарков."); return }
+        let candidates = self.appearance.gifts.filter { $0.direction == .received && $0.isHistoryOnly != true && $0.isCrafted != true }
+        var refresh: Signal<Bool, NoError> = .single(true)
+        for local in candidates {
+            guard case let .unique(gift) = local.gift else { continue }
+            let reference = local.reference(accountId: self.targetPeerId)
+            refresh = refresh |> mapToSignal { [context = self.context] _ in
+                context.engine.payments.getUniqueStarGift(slug: gift.slug)
+                |> map { fresh -> Bool in
+                    VisualGramLocalAppearance.shared.updateLocalCraftMetadata(accountId: context.account.peerId, reference: reference, gift: fresh)
+                    return true
+                }
+                |> `catch` { _ in .single(false) }
+            }
+        }
+        self.disposables.add((refresh |> deliverOnMainQueue).start(next: { [weak self] _ in
+            guard let self else { return }
+            let now = Int32(clamping: Int64(Date().timeIntervalSince1970))
+            let eligible: (VisualGramGift) -> Bool = { local in
+                local.isCrafted != true && (local.craftChance ?? 0) > 0 && (local.canCraftAt ?? 0) <= now
+            }
+            guard self.appearance.gifts.contains(where: { $0.direction == .received && $0.isHistoryOnly != true && eligible($0) }) else { self.message("Нет доступных для крафта подарков. Метаданные загружаются из Telegram; проверь подключение и срок разблокировки подарков."); return }
+            self.controller?.push(VisualGramGiftGridController(context: self.context, target: self.targetPeerId, cardMode: true, filterGift: eligible, openGift: { [weak self] id in
+                guard let self, let local = self.appearance.gifts.first(where: { $0.identifier == id && $0.direction == .received && $0.isHistoryOnly != true }), case let .unique(gift) = local.displayGift(accountId: self.targetPeerId), eligible(local) else { return }
+                self.controller?.push(GiftCraftScreen(context: self.context, gift: gift, profileGiftsContext: nil))
+            }))
+        }))
+    }
+
+    private func openGrid() {
+        self.controller?.push(VisualGramGiftGridController(context: self.context, target: self.targetPeerId, addGift: { [weak self] in self?.open(24) }, openGift: { [weak self] id in
             guard let self, let index = self.appearance.gifts.firstIndex(where: { $0.identifier == id }) else { return }
             self.openGift(index: index)
         }))
@@ -480,29 +513,6 @@ private final class VisualGramAppearanceActions {
     private func openGift(index: Int) {
         guard self.appearance.gifts.indices.contains(index), self.controller != nil else { return }
         let local = self.appearance.gifts[index]
-        let alert = UIAlertController(title: "Подарок", message: nil, preferredStyle: .alert)
-        if local.direction == .received && local.isHistoryOnly != true && self.targetPeerId == self.context.account.peerId {
-            alert.addAction(UIAlertAction(title: (local.pinnedToTop ?? false) ? "Открепить" : "Закрепить", style: .default, handler: { [weak self] _ in
-                guard let self else { return }
-                let configuredLimit = self.context.currentAppConfiguration.with { $0 }.data?["stargifts_pinned_to_top_limit"] as? Double ?? 6
-                let limit = configuredLimit.isFinite && configuredLimit >= 0 && configuredLimit < Double(Int.max) ? Int(configuredLimit) : 6
-                if !(local.pinnedToTop ?? false), self.appearance.gifts.filter({ $0.direction == .received && $0.isHistoryOnly != true && $0.pinnedToTop == true }).count >= limit { self.message("Можно закрепить до \(limit) подарков."); return }
-                _ = VisualGramLocalAppearance.shared.updateGift(accountId: self.context.account.peerId, reference: local.reference(accountId: self.targetPeerId)) { $0.pinnedToTop = !($0.pinnedToTop ?? false); if $0.pinnedToTop == true { $0.savedToProfile = true } }
-            }))
-            alert.addAction(UIAlertAction(title: (local.savedToProfile ?? true) ? "Скрыть из профиля" : "Показать в профиле", style: .default, handler: { [weak self] _ in
-                guard let self else { return }
-                _ = VisualGramLocalAppearance.shared.updateGift(accountId: self.context.account.peerId, reference: local.reference(accountId: self.targetPeerId)) { $0.savedToProfile = !($0.savedToProfile ?? true); if $0.savedToProfile == false { $0.pinnedToTop = false } }
-            }))
-            alert.addAction(UIAlertAction(title: "Изменить дату и подпись", style: .default, handler: { [weak self] _ in
-                guard let self else { return }
-                self.form(title: "Данные подарка", fields: [("Дата: yyyy-MM-dd HH:mm", self.dateFormatter.string(from: Date(timeIntervalSince1970: TimeInterval(local.date)))), ("Подпись", local.text)]) { [weak self] values in
-                    guard let self, values.count == 2, let date = self.dateFormatter.date(from: values[0]), date.timeIntervalSince1970 >= 0, date.timeIntervalSince1970 <= Double(Int32.max) else { self?.message("Проверь дату."); return }
-                    _ = VisualGramLocalAppearance.shared.updateGift(accountId: self.context.account.peerId, reference: local.reference(accountId: self.targetPeerId)) { $0.date = Int32(date.timeIntervalSince1970); $0.text = values[1] }
-                }
-            }))
-        }
-        alert.addAction(UIAlertAction(title: "Открыть подарок", style: .default, handler: { [weak self] _ in
-            guard let self else { return }
             let show: (EnginePeer?) -> Void = { [weak self] sender in
                 guard let self else { return }
                 let screen: GiftViewScreen
@@ -525,21 +535,8 @@ private final class VisualGramAppearanceActions {
             if let senderId = local.counterpartyId {
                 self.disposables.add((self.context.engine.data.get(TelegramEngine.EngineData.Item.Peer.Peer(id: EnginePeer.Id(senderId))) |> deliverOnMainQueue).start(next: show))
             } else { show(nil) }
-        }))
-        if local.direction == .received, local.isHistoryOnly != true, case let .unique(gift) = local.displayGift(accountId: self.targetPeerId) {
-            alert.addAction(UIAlertAction(title: "Поставить в статус", style: .default, handler: { [weak self] _ in
-                guard let self, self.appearance.gifts.contains(where: { $0.identifier == local.identifier && $0.direction == .received && $0.isHistoryOnly != true }) else { return }
-                self.update { $0.enabled = true; $0.premium = true }
-                _ = VisualGramLocalAppearance.shared.setLocalGiftStatus(accountId: self.context.account.peerId, targetPeerId: self.targetPeerId, gift: gift, expirationDate: nil)
-            }))
-        }
-        alert.addAction(UIAlertAction(title: "Удалить", style: .destructive, handler: { [weak self] _ in
-            guard let self else { return }
-            VisualGramLocalAppearance.shared.removeLocalGifts(accountId: self.context.account.peerId, targetPeerId: self.targetPeerId, identifiers: [local.identifier])
-        }))
-        alert.addAction(UIAlertAction(title: "Отмена", style: .cancel))
-        self.presentNative(alert)
     }
+
 }
 
 func visualGramAppearanceController(context: AccountContext) -> ViewController {
@@ -558,7 +555,9 @@ func visualGramAppearanceController(context: AccountContext) -> ViewController {
         add(14, 1, "Цвета и фон профиля", .button(""))
         add(15, 1, "Часы работы", .button(""))
         add(16, 1, "Адрес", .button(""))
-        add(27, 2, "Мои подарки", .button("Сетка и порядок"))
+        add(27, 2, "Мои подарки", .button(""))
+        add(28, 2, "Крафт подарков", .button(""))
+        add(903, -1, "Назад", .button(""))
         add(32, 3, "Баланс GRAM", .button(value.grams.map { VisualGramLocalAppearance.formatGrams($0) } ?? "Не задан"))
         add(33, 3, "Оформить карточку GRAM", .button(""))
         add(0, 0, "Оформление профиля", .toggle(value.enabled))
@@ -575,10 +574,6 @@ func visualGramAppearanceController(context: AccountContext) -> ViewController {
         add(11, 1, "Номер профиля / +888", .button(value.phoneNumber.map { "+\($0.name)" } ?? "Настоящий номер"))
         add(12, 1, "Рейтинг Telegram", .button(value.starRating.map { "Уровень \($0.level)" } ?? "Настоящий рейтинг"))
         add(13, 1, "Юзернеймы (\(value.usernames.count))", .button(expanded & 1 == 0 ? "Развернуть" : "Свернуть"))
-        add(20, 2, "Получить обычный подарок", .button(""))
-        add(21, 2, "Получить NFT-подарок", .button(""))
-        add(22, 2, "Отправить обычный подарок", .button(""))
-        add(23, 2, "Отправить NFT-подарок", .button(""))
         add(24, 2, "Добавить NFT в профиль", .button(""))
         add(30, 3, "Баланс звёзд", .button(value.stars.map(String.init) ?? "Настоящий баланс"))
         add(31, 3, "Добавить операцию", .button(""))
@@ -612,9 +607,11 @@ func visualGramAppearanceController(context: AccountContext) -> ViewController {
             add(3000 + Int32(index), 5, "Отложено: \(title)", .button(formatter.string(from: Date(timeIntervalSince1970: TimeInterval(pending.deliveryDate)))))
         }
         entries.removeAll { entry in
-            if entry.stableId >= 900 && entry.stableId <= 902 { return false }
+            if entry.stableId >= 900 && entry.stableId <= 902 { return activeSection != -1 }
+            if entry.stableId == 903 { return activeSection == -1 }
             if entry.stableId == 7 { return false }
-            if entry.stableId == 0 { return activeSection != 0 }
+            if entry.stableId == 0 { return activeSection != -1 }
+            if activeSection == -1 { return true }
             if entry.stableId == 6 || entry.stableId == 9 { return true }
             switch activeSection {
             case 1: return entry.section != 2 && entry.section != 5
@@ -623,7 +620,7 @@ func visualGramAppearanceController(context: AccountContext) -> ViewController {
             }
         }
         entries.sort()
-        let controllerState = ItemListControllerState(presentationData: ItemListPresentationData(presentationData), title: .text("VisualGram"), leftNavigationButton: nil, rightNavigationButton: nil, backNavigationButton: ItemListBackButton(title: presentationData.strings.Common_Back))
+        let controllerState = ItemListControllerState(presentationData: ItemListPresentationData(presentationData), title: .text(activeSection == -1 ? "VisualGram" : ["Профиль", "Подарки", "Балансы"][Int(activeSection)]), leftNavigationButton: nil, rightNavigationButton: nil, backNavigationButton: ItemListBackButton(title: presentationData.strings.Common_Back))
         let listState = ItemListNodeState(presentationData: ItemListPresentationData(presentationData), entries: entries, style: .blocks, animateChanges: false)
         return (controllerState, (listState, actions))
     }

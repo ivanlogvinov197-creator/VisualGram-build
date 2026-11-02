@@ -3,6 +3,16 @@ import Foundation
 public enum VisualGramCraftResult { case success(VisualGramGift), failure(CraftStarGiftError) }
 
 public extension VisualGramLocalAppearance {
+    func updateLocalCraftMetadata(accountId: EnginePeer.Id, reference: StarGiftReference, gift: StarGift.UniqueGift) {
+        self.update(accountId: accountId) { value in
+            guard let index = value.gifts.firstIndex(where: { $0.reference(accountId: accountId) == reference && $0.direction == .received && $0.isHistoryOnly != true && $0.isCrafted != true }),
+                  case let .unique(existing) = value.gifts[index].gift,
+                  existing.slug == gift.slug, existing.giftId == gift.giftId else { return }
+            // Refresh catalog metadata only. Keep local receipt, ownership, order,
+            // sale price and any separate locally configured unlock date.
+            value.gifts[index].gift = .unique(gift)
+        }
+    }
     func craftableLocalGifts(accountId: EnginePeer.Id, giftId: Int64, now: Int32) -> [VisualGramGift] {
         let value = self.appearance(accountId: accountId)
         guard value.enabled else { return [] }
@@ -45,10 +55,15 @@ public extension VisualGramLocalAppearance {
             for index in owner.gifts.indices where consumed.contains(owner.gifts[index].identifier) {
                 owner.gifts[index].isHistoryOnly = true
                 owner.gifts[index].resaleStars = nil
+                owner.gifts[index].resaleGrams = nil
                 owner.gifts[index].savedToProfile = false
                 owner.gifts[index].pinnedToTop = false
                 owner.gifts[index].collectionIds = nil
             }
+            owner.gramCardGiftIds?.removeAll { consumed.contains($0) }
+            owner.gramCardPlacements = owner.gramCardPlacements?.filter { !consumed.contains($0.key) }
+            if let id = owner.gramCardBackgroundId, consumed.contains(id) { owner.gramCardBackgroundId = nil }
+            owner.giftOrder?.removeAll { consumed.contains($0) }
             if case let .starGift(id, _, _, _, _, _, _, _, _) = owner.emojiStatus?.content, uniques.contains(where: { $0.id == id }) {
                 owner.overridesEmojiStatus = true; owner.emojiStatus = nil
             }
@@ -76,7 +91,7 @@ public extension VisualGramLocalAppearance {
                 crafted.date = now; crafted.counterpartyId = nil; crafted.text = ""
                 crafted.isHistoryOnly = false; crafted.isCrafted = true; crafted.canCraftAt = nil
                 crafted.savedToProfile = true; crafted.pinnedToTop = false; crafted.collectionIds = nil
-                crafted.resaleStars = nil; crafted.purchaseStars = nil; crafted.purchaseGrams = nil; crafted.purchaseBuyerId = nil
+                crafted.resaleStars = nil; crafted.resaleGrams = nil; crafted.purchaseStars = nil; crafted.purchaseGrams = nil; crafted.purchaseBuyerId = nil
                 owner.gifts.append(crafted)
                 result = .success(crafted)
             } else { result = .failure(.craftFailed) }

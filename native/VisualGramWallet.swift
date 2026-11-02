@@ -21,18 +21,13 @@ public extension VisualGramLocalAppearance {
     }
 
     private static func gramPrice(gift: StarGift.UniqueGift, starsPerUnit: Int64?) -> Int64? {
-        if let amount = gift.resellAmounts?.first(where: { $0.currency == .ton })?.amount.value, amount > 0 { return amount }
-        guard let price = gift.resellAmounts?.first(where: { $0.currency == .stars })?.amount.value,
-              price > 0, let rate = starsPerUnit, rate > 0 else { return nil }
-        var raw = Decimal(price) * Decimal(Self.gramScale) / Decimal(rate)
-        var rounded = Decimal()
-        NSDecimalRound(&rounded, &raw, 0, .up)
-        guard rounded > 0, rounded <= Decimal(Int64.max) else { return nil }
-        return NSDecimalNumber(decimal: rounded).int64Value
+        // A listing's currency is authoritative. Never manufacture a second quote.
+        guard let amount = gift.resellAmounts?.first(where: { $0.currency == .ton })?.amount.value, amount > 0 else { return nil }
+        return amount
     }
 
-    func displayWalletCard(accountId: EnginePeer.Id, peerId: EnginePeer.Id, server: WalletCard?) -> WalletCard? {
-        let value = self.appearance(accountId: accountId, targetPeerId: peerId)
+    func displayWalletCard(accountId: EnginePeer.Id, peerId: EnginePeer.Id, server: WalletCard?, appearanceOverride: VisualGramAppearance? = nil) -> WalletCard? {
+        let value = appearanceOverride ?? self.appearance(accountId: accountId, targetPeerId: peerId)
         guard value.enabled, let grams = value.grams else { return server }
         let selected = (value.gramCardGiftIds ?? []).prefix(10).compactMap { id -> VisualGramGift? in
             value.gifts.first { $0.identifier == id && $0.direction == .received && $0.isHistoryOnly != true }
@@ -40,7 +35,9 @@ public extension VisualGramLocalAppearance {
         let stickers = selected.enumerated().compactMap { index, local -> WalletCard.Sticker? in
             guard case let .unique(gift) = local.displayGift(accountId: peerId) else { return nil }
             let nft = WalletNftItem(collectionAddress: nil, address: "visualgram:" + gift.slug, ownerAddress: "", index: String(gift.number), name: gift.title, description: nil, image: nil, imageSmall: nil, contentUrl: nil, lottie: nil, attributes: nil, extra: nil, gift: gift)
-            return WalletCard.Sticker(coordinates: .init(x: 20.0 + Double(index % 4) * 20.0, y: 74.0 - Double(index / 4) * 24.0, width: 24.0, height: 40.0, rotation: 0.0, cornerRadius: nil), nft: nft)
+            let placement = (value.gramCardPlacements?[local.identifier] ?? .init(x: 20.0 + Double(index % 4) * 20.0, y: 74.0 - Double(index / 4) * 24.0)).normalized
+            let width = 83.4 / 361.0 * 100 * placement.scale
+            return WalletCard.Sticker(coordinates: .init(x: placement.x, y: placement.y, width: width, height: width * 370 / 220, rotation: placement.angle, cornerRadius: nil), nft: nft)
         }
         var background: WalletNftItem?
         if let local = selected.first(where: { $0.identifier == value.gramCardBackgroundId }), case let .unique(gift) = local.gift {
@@ -51,12 +48,7 @@ public extension VisualGramLocalAppearance {
     }
 
     func giftForLocalPurchase(accountId: EnginePeer.Id, gift: StarGift.UniqueGift) -> StarGift.UniqueGift {
-        var prices = gift.resellAmounts ?? []
-        let value = self.appearance(accountId: accountId)
-        if value.enabled, value.grams != nil, let price = self.localGramPrice(accountId: accountId, gift: gift), !prices.contains(where: { $0.currency == .ton }) {
-            prices.append(CurrencyAmount(amount: StarsAmount(value: price, nanos: 0), currency: .ton))
-        }
-        return StarGift.UniqueGift(id: gift.id, giftId: gift.giftId, title: gift.title, number: gift.number, slug: gift.slug, owner: gift.owner, attributes: gift.attributes, availability: gift.availability, giftAddress: gift.giftAddress, resellAmounts: prices, resellForTonOnly: gift.resellForTonOnly, releasedBy: gift.releasedBy, valueAmount: gift.valueAmount, valueCurrency: gift.valueCurrency, valueUsdAmount: gift.valueUsdAmount, flags: gift.flags, themePeerId: gift.themePeerId, peerColor: gift.peerColor, hostPeerId: gift.hostPeerId, minOfferStars: gift.minOfferStars, craftChancePermille: gift.craftChancePermille)
+        return gift
     }
 
     func buyLocalGiftWithGrams(accountId: EnginePeer.Id, recipientPeerId: EnginePeer.Id, gift: StarGift.UniqueGift, price: Int64, requireListing: Bool, now: Int32) -> VisualGramGiftPurchaseResult {
@@ -71,11 +63,8 @@ public extension VisualGramLocalAppearance {
             if let (sellerId, index) = seller {
                 let sellerRawId = sellerId.toInt64(), key = String(sellerId.toInt64())
                 guard key != buyerKey, key != String(recipientPeerId.toInt64()), var sellerValue = values[key], sellerValue.enabled,
-                      let askingStars = sellerValue.gifts[index].resaleStars, askingStars > 0,
-                      let rate = buyer.gramStarsPerUnit, rate > 0 else { return }
-                var raw = Decimal(askingStars) * Decimal(Self.gramScale) / Decimal(rate)
-                var rounded = Decimal(); NSDecimalRound(&rounded, &raw, 0, .up)
-                guard rounded == Decimal(price) else { result = .priceChanged; return }
+                      let askingGrams = sellerValue.gifts[index].resaleGrams, askingGrams > 0 else { return }
+                guard askingGrams == price else { result = .priceChanged; return }
                 let (credited, overflow) = (sellerValue.grams ?? 0).addingReportingOverflow(price)
                 guard !overflow else { result = .invalid; return }
                 buyer.grams = balance - price

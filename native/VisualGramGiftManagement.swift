@@ -21,6 +21,29 @@ public struct VisualGramScheduledGift: Codable, Equatable {
 }
 
 public extension VisualGramLocalAppearance {
+    @discardableResult
+    func saveGiftOrder(accountId: EnginePeer.Id, targetPeerId: EnginePeer.Id, identifiers: [String]) -> Bool {
+        var saved = false
+        self.update(accountId: accountId, targetPeerId: targetPeerId) { value in
+            let owned = value.gifts.filter { $0.direction == .received && $0.isHistoryOnly != true }
+            guard identifiers.count == owned.count, Set(identifiers).count == identifiers.count,
+                  Set(identifiers) == Set(owned.map { $0.identifier }) else { return }
+            let byId = Dictionary(uniqueKeysWithValues: owned.map { ($0.identifier, $0) })
+            // Telegram always renders pinned gifts first. Preserve that invariant
+            // in storage as well, so the editor agrees with the profile.
+            let ordered = identifiers.compactMap { byId[$0] }
+            let normalized = ordered.filter { $0.pinnedToTop == true } + ordered.filter { $0.pinnedToTop != true }
+            value.giftOrder = normalized.map { $0.identifier }
+            var index = 0
+            value.gifts = value.gifts.map { gift in
+                guard gift.direction == .received && gift.isHistoryOnly != true else { return gift }
+                defer { index += 1 }
+                return normalized[index]
+            }
+            saved = true
+        }
+        return saved
+    }
     func chatGifts(accountId: EnginePeer.Id, peerId: EnginePeer.Id) -> [VisualGramGift] {
         let own = self.appearance(accountId: accountId)
         let other = self.appearance(accountId: accountId, targetPeerId: peerId)
@@ -226,6 +249,7 @@ public extension VisualGramLocalAppearance {
             value.gifts.removeAll { identifiers.contains($0.identifier) }
             value.giftOrder?.removeAll { identifiers.contains($0) }
             value.gramCardGiftIds?.removeAll { identifiers.contains($0) }
+            value.gramCardPlacements = value.gramCardPlacements?.filter { !identifiers.contains($0.key) }
             if let id = value.gramCardBackgroundId, identifiers.contains(id) { value.gramCardBackgroundId = nil }
         }
     }

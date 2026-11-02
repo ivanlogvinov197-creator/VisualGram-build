@@ -70,15 +70,16 @@ public extension VisualGramLocalAppearance {
     }
 
     @discardableResult
-    func listLocalGift(accountId: EnginePeer.Id, reference: StarGiftReference?, price: Int64?) -> Bool {
-        guard price == nil || (price! > 0 && price! <= Int64(Int32.max)),
+    func listLocalGift(accountId: EnginePeer.Id, reference: StarGiftReference?, price: Int64?, currency: CurrencyAmount.Currency = .stars) -> Bool {
+        guard (currency == .stars || currency == .ton), price == nil || (price! > 0 && (currency == .ton || price! <= Int64(Int32.max))),
               self.canManageLocalGift(accountId: accountId, reference: reference),
               case .unique = self.localGift(accountId: accountId, reference: reference)?.gift else { return false }
         var changed = false
         self.updateValues { values in
             let key = String(accountId.toInt64())
             guard let index = values[key]?.gifts.firstIndex(where: { $0.reference(accountId: accountId) == reference && $0.direction == .received && $0.isHistoryOnly != true }) else { return }
-            values[key]?.gifts[index].resaleStars = price
+            values[key]?.gifts[index].resaleStars = currency == .stars ? price : nil
+            values[key]?.gifts[index].resaleGrams = currency == .ton ? price : nil
             changed = true
         }
         return changed
@@ -200,6 +201,7 @@ public extension VisualGramLocalAppearance {
         history.localIdentifier = "history:\(UUID().uuidString)"
         history.isHistoryOnly = true
         history.resaleStars = nil
+        history.resaleGrams = nil
         owner.gifts[index] = history
         var outgoing = original
         outgoing.localIdentifier = "sent:\(UUID().uuidString)"
@@ -209,6 +211,7 @@ public extension VisualGramLocalAppearance {
         outgoing.isTransferred = true
         outgoing.isHistoryOnly = true
         outgoing.resaleStars = nil
+        outgoing.resaleGrams = nil
         outgoing.purchaseStars = buyerId == recipientId ? purchaseStars : nil
         outgoing.purchaseGrams = buyerId == recipientId ? purchaseGrams : nil
         outgoing.purchaseBuyerId = buyerId == recipientId ? buyerId?.toInt64() : nil
@@ -217,6 +220,9 @@ public extension VisualGramLocalAppearance {
             owner.overridesEmojiStatus = true
             owner.emojiStatus = nil
         }
+        owner.gramCardGiftIds?.removeAll { $0 == original.identifier }
+        owner.gramCardPlacements?.removeValue(forKey: original.identifier)
+        if owner.gramCardBackgroundId == original.identifier { owner.gramCardBackgroundId = nil }
         values[ownerKey] = owner
         var target = values[targetKey] ?? VisualGramAppearance()
         target.enabled = true
@@ -230,6 +236,7 @@ public extension VisualGramLocalAppearance {
         received.isHistoryOnly = false
         received.isTransferred = true
         received.resaleStars = nil
+        received.resaleGrams = nil
         received.purchaseStars = purchaseStars
         received.purchaseGrams = purchaseGrams
         received.purchaseBuyerId = buyerId?.toInt64()
@@ -250,7 +257,7 @@ public extension VisualGramLocalAppearance {
     func hasLocalGiftListings(giftId: Int64) -> Bool {
         return self.snapshotValues().values.contains { value in
             value.enabled && value.gifts.contains { local in
-                guard local.direction == .received, local.isHistoryOnly != true, (local.resaleStars ?? 0) > 0, case let .unique(gift) = local.gift else { return false }
+                guard local.direction == .received, local.isHistoryOnly != true, ((local.resaleStars ?? 0) > 0 || (local.resaleGrams ?? 0) > 0), case let .unique(gift) = local.gift else { return false }
                 return gift.giftId == giftId
             }
         }
@@ -270,7 +277,8 @@ public extension VisualGramLocalAppearance {
         for (key, value) in self.snapshotValues().sorted(by: { $0.key < $1.key }) where value.enabled {
             guard let rawId = Int64(key) else { continue }
             let craftableIds: Set<String>? = forCrafting ? Set(self.craftableLocalGifts(accountId: EnginePeer.Id(rawId), giftId: giftId, now: Int32(clamping: Int64(Date().timeIntervalSince1970))).map { $0.identifier }) : nil
-            for item in value.gifts where item.direction == .received && item.isHistoryOnly != true && (item.resaleStars ?? 0) > 0 {
+            for item in value.gifts where item.direction == .received && item.isHistoryOnly != true && ((item.resaleStars ?? 0) > 0 || (item.resaleGrams ?? 0) > 0) {
+                if server.starsOnly && (item.resaleStars ?? 0) <= 0 { continue }
                 if let craftableIds, !craftableIds.contains(item.identifier) { continue }
                 if case let .unique(gift) = item.gift, gift.giftId == giftId {
                     let displayed = item.displayGift(accountId: EnginePeer.Id(rawId))
