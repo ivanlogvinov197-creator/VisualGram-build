@@ -41,13 +41,23 @@ public extension VisualGramLocalAppearance {
         result.localIdentifier = legacy ? "operation:" + gift.identifier : "operation:" + UUID().uuidString
         result.operationSourceId = gift.identifier
         if kind == .craft, let consumedAt = gift.consumedAt { result.date = consumedAt }
-        result.operationKind = kind ?? (gift.isCrafted == true ? .craft : (gift.purchaseStars != nil || gift.purchaseGrams != nil ? .purchase : (gift.isTransferred == true ? .transfer : (gift.direction == .sent ? .sent : .received))))
+        result.operationKind = kind ?? (gift.direction == .sent ? (gift.isTransferred == true ? .transfer : .sent) : (gift.purchaseStars != nil || gift.purchaseGrams != nil ? .purchase : (gift.isCrafted == true && gift.counterpartyId == nil ? .craft : .received)))
+        result.operationEventId = nil; result.operationEventKind = nil; result.operationUndo = nil
+        result.operationSenderId = nil; result.operationRecipientId = nil
+        result.operationInputs = nil; result.operationResult = nil; result.operationSucceeded = nil
         result.isHistoryOnly = true; result.resaleStars = nil; result.resaleGrams = nil
         return result
     }
 
     static func giftOperations(in value: VisualGramAppearance) -> [VisualGramGift] {
-        return (value.giftOperationHistory ?? value.gifts.map { Self.operationSnapshot($0, legacy: true) }).sorted { $0.date > $1.date }
+        return (value.giftOperationHistory ?? value.gifts.map { Self.operationSnapshot($0, legacy: true) }).map { item in
+            var item = item
+            if let rawKind = item.operationEventKind, let kind = VisualGramGift.OperationKind(rawValue: rawKind) { item.operationKind = kind }
+            if item.operationEventId == nil, item.operationKind == .craft, item.counterpartyId != nil || item.direction == .sent {
+                item.operationKind = item.direction == .sent ? (item.isTransferred == true ? .transfer : .sent) : .received
+            }
+            return item
+        }.sorted { $0.date > $1.date }
     }
 
     static func recordGiftOperations(previous: VisualGramAppearance?, value: inout VisualGramAppearance) {
@@ -68,7 +78,7 @@ public extension VisualGramLocalAppearance {
     @discardableResult
     func editGiftDetails(accountId: EnginePeer.Id, targetPeerId: EnginePeer.Id, identifier: String, history: Bool, counterpartyId: Int64?, date: Int32, text: String) -> Bool {
         var edited = false
-        self.updateValues { values in
+        self.updateValues(recordOperations: false) { values in
             let key = String(targetPeerId.toInt64())
             guard var value = values[key] else { return }
             var operations = Self.giftOperations(in: value)
@@ -113,6 +123,7 @@ public extension VisualGramLocalAppearance {
                     other.giftOperationHistory = ledger; values[oldKey] = other
                 }
             }
+            Self.editGiftOperationNarrative(original, profile: targetPeerId.toInt64(), counterparty: counterpartyId, date: date, text: text, values: &values)
             edited = true
         }
         return edited

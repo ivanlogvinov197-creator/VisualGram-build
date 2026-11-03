@@ -132,12 +132,16 @@ final class VisualGramListController: ViewController, UITableViewDataSource, UIT
     private let openRow: (String) -> Void
     private let editRow: (String) -> Void
     private let deleteRow: (String) -> Void
+    private let allowsEditing: Bool
+    private let deleteTitle: String
+    private let deleteConfirmation: String?
     private let table = UITableView(frame: .zero, style: .insetGrouped)
     private var items: [VisualGramListRow] = []
     private var moving = false
     private var disposable: Disposable?
-    init(context: AccountContext, target: EnginePeer.Id, title: String, rows: @escaping () -> [VisualGramListRow], reorder: (([String]) -> Bool)?, open: @escaping (String) -> Void, edit: @escaping (String) -> Void, delete: @escaping (String) -> Void) {
+    init(context: AccountContext, target: EnginePeer.Id, title: String, rows: @escaping () -> [VisualGramListRow], reorder: (([String]) -> Bool)?, open: @escaping (String) -> Void, edit: @escaping (String) -> Void, delete: @escaping (String) -> Void, allowsEditing: Bool = true, deleteTitle: String = "Удалить", deleteConfirmation: String? = nil) {
         self.context = context; self.target = target; self.rows = rows; self.reorder = reorder; self.openRow = open; self.editRow = edit; self.deleteRow = delete
+        self.allowsEditing = allowsEditing; self.deleteTitle = deleteTitle; self.deleteConfirmation = deleteConfirmation
         super.init(navigationBarPresentationData: NavigationBarPresentationData(presentationData: context.sharedContext.currentPresentationData.with { $0 }))
         self.title = title
     }
@@ -166,7 +170,7 @@ final class VisualGramListController: ViewController, UITableViewDataSource, UIT
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         let cell = tableView.dequeueReusableCell(withIdentifier: "item", for: indexPath) as! VisualGramListCell
         let row = self.items[indexPath.row], theme = self.context.sharedContext.currentPresentationData.with { $0 }.theme
-        cell.textLabel?.text = row.title; cell.detailTextLabel?.text = row.subtitle
+        cell.textLabel?.text = row.title; cell.detailTextLabel?.text = row.subtitle; cell.detailTextLabel?.numberOfLines = 2
         cell.textLabel?.textColor = theme.list.itemPrimaryTextColor; cell.detailTextLabel?.textColor = theme.list.itemSecondaryTextColor
         cell.backgroundColor = theme.list.itemBlocksBackgroundColor
         cell.giftPreview.isHidden = row.gift == nil
@@ -180,16 +184,18 @@ final class VisualGramListController: ViewController, UITableViewDataSource, UIT
     }
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) { tableView.deselectRow(at: indexPath, animated: true); self.openRow(self.items[indexPath.row].id) }
     func tableView(_ tableView: UITableView, leadingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
+        guard self.allowsEditing else { return nil }
         let id = self.items[indexPath.row].id
         return UISwipeActionsConfiguration(actions: [UIContextualAction(style: .normal, title: "Изменить", handler: { [weak self] _, _, done in done(true); self?.editRow(id) })])
     }
     func tableView(_ tableView: UITableView, trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
+        guard self.allowsEditing else { return nil }
         let id = self.items[indexPath.row].id
-        return UISwipeActionsConfiguration(actions: [UIContextualAction(style: .destructive, title: "Удалить", handler: { [weak self] _, _, done in
+        return UISwipeActionsConfiguration(actions: [UIContextualAction(style: .destructive, title: self.deleteTitle, handler: { [weak self] _, _, done in
             guard let self else { done(false); return }
-            let alert = UIAlertController(title: "Удалить запись?", message: nil, preferredStyle: .alert)
+            let alert = UIAlertController(title: self.deleteTitle + "?", message: self.deleteConfirmation, preferredStyle: .alert)
             alert.addAction(UIAlertAction(title: "Отмена", style: .cancel, handler: { _ in done(false) }))
-            alert.addAction(UIAlertAction(title: "Удалить", style: .destructive, handler: { _ in self.deleteRow(id); done(true) }))
+            alert.addAction(UIAlertAction(title: self.deleteTitle, style: .destructive, handler: { _ in self.deleteRow(id); done(true) }))
             self.present(alert, animated: true)
         })])
     }

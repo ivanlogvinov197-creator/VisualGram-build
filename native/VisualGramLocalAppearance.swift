@@ -66,7 +66,23 @@ public struct VisualGramGift: Codable, Equatable {
             self.gift = gift
         }
     }
-    public enum OperationKind: String, Codable { case received, sent, purchase, transfer, craft }
+    public enum OperationKind: String, Codable {
+        case received, sent, purchase, transfer, craft, upgrade
+        public func encode(to encoder: Encoder) throws {
+            var container = encoder.singleValueContainer()
+            // Older IPAs can still decode the profile; the precise new event kind has its own optional field.
+            try container.encode(self == .upgrade ? "received" : self.rawValue)
+        }
+    }
+    public var lifecycleEventId: String?
+    public var operationEventId: String?
+    public var operationEventKind: String?
+    public var operationSenderId: Int64?
+    public var operationRecipientId: Int64?
+    public var operationInputs: [StarGift]?
+    public var operationResult: StarGift?
+    public var operationSucceeded: Bool?
+    public var operationUndo: Data?
     public var operationSourceId: String?
     public var consumedAt: Int32?
     public var operationKind: OperationKind?
@@ -328,17 +344,12 @@ public final class VisualGramLocalAppearance {
         }
     }
 
-    func updateValues(_ transform: (inout [String: VisualGramAppearance]) -> Void) {
+    func updateValues(recordOperations: Bool = true, _ transform: (inout [String: VisualGramAppearance]) -> Void) {
         self.lock.lock()
         guard VisualGramActivation.shared.hasAccess else { self.lock.unlock(); return }
         let previous = self.values
         transform(&self.values)
-        for key in Array(self.values.keys) {
-            if var value = self.values[key] {
-                Self.recordGiftOperations(previous: previous[key], value: &value)
-                self.values[key] = value
-            }
-        }
+        if recordOperations { Self.recordGiftOperations(previous: previous, values: &self.values) }
         if let data = try? JSONEncoder().encode(self.values) {
             self.defaults.set(data, forKey: "visualgram.appearance.v3")
         }
