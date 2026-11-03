@@ -1,7 +1,6 @@
 import Foundation
 import CryptoKit
 import Security
-import UIKit
 
 // The server key is public. Neither code-generation nor signing secrets ship in the IPA.
 struct VisualGramActivationGrant: Codable {
@@ -45,6 +44,8 @@ public final class VisualGramActivation {
     private var grantUptime: TimeInterval = 0
     private var message = "Для проверки доступа подключитесь к интернету."
     private var started = false
+    private var foreground = false
+    private var vendorIdentifier: String?
     private var inFlight = false
     private var generation = 0
     private var timer: Timer?
@@ -80,14 +81,18 @@ public final class VisualGramActivation {
         return "Пробный доступ: осталось \(Int(remaining) / 3600) ч \((Int(remaining) % 3600) / 60) мин."
     }
 
-    public func start() {
-        if !Thread.isMainThread { DispatchQueue.main.async { self.start() }; return }
+    public func start(vendorIdentifier: String?, isForeground: Bool, activeNotification: Notification.Name, backgroundNotification: Notification.Name) {
+        if !Thread.isMainThread { DispatchQueue.main.async { self.start(vendorIdentifier:vendorIdentifier,isForeground:isForeground,activeNotification:activeNotification,backgroundNotification:backgroundNotification) }; return }
         guard !self.started else { return }
         self.started = true
-        self.observers.append(NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
+        self.foreground = isForeground
+        self.vendorIdentifier = vendorIdentifier
+        self.observers.append(NotificationCenter.default.addObserver(forName: backgroundNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.foreground = false
             self?.invalidate(message: "Требуется проверка доступа через интернет.")
         })
-        self.observers.append(NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+        self.observers.append(NotificationCenter.default.addObserver(forName: activeNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.foreground = true
             self?.refresh()
         })
         let timer = Timer(timeInterval: 15, repeats: true) { [weak self] _ in self?.tick() }
@@ -111,7 +116,7 @@ public final class VisualGramActivation {
     }
 
     private func tick() {
-        guard UIApplication.shared.applicationState == .active else { return }
+        guard self.foreground else { return }
         self.lock.lock()
         let age = ProcessInfo.processInfo.systemUptime - self.grantUptime
         let hasGrant = self.grant != nil
@@ -123,31 +128,31 @@ public final class VisualGramActivation {
     private func identity() throws -> (SecKey, Data, String) {
         let tag = Data("app.visualgram.activation.secureenclave.v1".utf8)
         if self.key == nil {
-            let query: [CFString: Any] = [kSecClass:kSecClassKey, kSecAttrApplicationTag:tag, kSecAttrKeyType:kSecAttrKeyTypeECSECPrimeRandom, kSecReturnRef:true]
+            let query: [String: Any] = [kSecClass as String:kSecClassKey, kSecAttrApplicationTag as String:tag, kSecAttrKeyType as String:kSecAttrKeyTypeECSECPrimeRandom, kSecReturnRef as String:true]
             var found: CFTypeRef?
             let result = SecItemCopyMatching(query as CFDictionary, &found)
             if result == errSecSuccess, let found = found { self.key = (found as! SecKey) }
             else if result == errSecItemNotFound {
                 guard let access = SecAccessControlCreateWithFlags(nil, kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly, [.privateKeyUsage], nil) else { throw self.failure() }
-                let attributes: [CFString: Any] = [kSecAttrKeyType:kSecAttrKeyTypeECSECPrimeRandom, kSecAttrKeySizeInBits:256, kSecAttrTokenID:kSecAttrTokenIDSecureEnclave, kSecPrivateKeyAttrs:[kSecAttrIsPermanent:true, kSecAttrApplicationTag:tag, kSecAttrAccessControl:access]]
+                let attributes: [String: Any] = [kSecAttrKeyType as String:kSecAttrKeyTypeECSECPrimeRandom, kSecAttrKeySizeInBits as String:256, kSecAttrTokenID as String:kSecAttrTokenIDSecureEnclave, kSecPrivateKeyAttrs as String:[kSecAttrIsPermanent as String:true, kSecAttrApplicationTag as String:tag, kSecAttrAccessControl as String:access]]
                 self.key = SecKeyCreateRandomKey(attributes as CFDictionary, nil)
             } else { throw self.failure() }
         }
         guard let key = self.key, let publicKey = SecKeyCopyPublicKey(key),
               let raw = SecKeyCopyExternalRepresentation(publicKey, nil) as Data?, raw.count == 65 else { throw self.failure() }
         if self.hint == nil {
-            let query: [CFString:Any] = [kSecClass:kSecClassGenericPassword, kSecAttrService:"app.visualgram.activation.v1", kSecAttrAccount:"device-hint", kSecReturnData:true]
+            let query: [String:Any] = [kSecClass as String:kSecClassGenericPassword, kSecAttrService as String:"app.visualgram.activation.v1", kSecAttrAccount as String:"device-hint", kSecReturnData as String:true]
             var item: CFTypeRef?
             let result = SecItemCopyMatching(query as CFDictionary, &item)
             if result == errSecSuccess, let data = item as? Data, let text = String(data:data,encoding:.utf8), text.count == 64 {
                 self.hint = text
             } else if result == errSecItemNotFound {
-                let source = UIDevice.current.identifierForVendor?.uuidString ?? UUID().uuidString
+                let source = self.vendorIdentifier ?? UUID().uuidString
                 let text = self.hex(Data(SHA256.hash(data:Data(("visualgram-v1:" + source).utf8))))
                 var insert = query
-                insert.removeValue(forKey:kSecReturnData)
-                insert[kSecValueData] = Data(text.utf8)
-                insert[kSecAttrAccessible] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+                insert.removeValue(forKey:kSecReturnData as String)
+                insert[kSecValueData as String] = Data(text.utf8)
+                insert[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
                 guard SecItemAdd(insert as CFDictionary, nil) == errSecSuccess else { throw self.failure() }
                 self.hint = text
             } else { throw self.failure() }
@@ -190,7 +195,7 @@ public final class VisualGramActivation {
     public func refresh(code: String = "", completion: ((String?) -> Void)? = nil) {
         if !Thread.isMainThread { DispatchQueue.main.async { self.refresh(code:code, completion:completion) }; return }
         guard !self.inFlight else { completion?("Проверка уже выполняется. Подождите несколько секунд."); return }
-        guard UIApplication.shared.applicationState != .background else { completion?("Откройте приложение для проверки доступа."); return }
+        guard self.foreground else { completion?("Откройте приложение для проверки доступа."); return }
         let normalized = code.uppercased().replacingOccurrences(of:"-",with:"").replacingOccurrences(of:" ",with:"").trimmingCharacters(in:.whitespacesAndNewlines)
         guard normalized.isEmpty || (normalized.count == 32 && normalized.allSatisfy { "0123456789ABCDEF".contains($0) }) else { completion?("Проверьте формат кода активации."); return }
         let identity: (SecKey,Data,String)

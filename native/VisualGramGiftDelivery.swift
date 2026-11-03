@@ -16,7 +16,7 @@ final class VisualGramGiftDelivery {
     private var isPrimary = false
 
     init(context: AccountContext) {
-        VisualGramActivation.shared.start()
+        VisualGramActivation.shared.start(vendorIdentifier: UIDevice.current.identifierForVendor?.uuidString, isForeground: UIApplication.shared.applicationState != .background, activeNotification: UIApplication.didBecomeActiveNotification, backgroundNotification: UIApplication.didEnterBackgroundNotification)
         self.context = context
         self.accountId = context.account.peerId
         let recordId = context.account.id

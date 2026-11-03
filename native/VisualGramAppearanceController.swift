@@ -642,7 +642,7 @@ private final class VisualGramAppearanceActions {
 }
 
 func visualGramAppearanceController(context: AccountContext) -> ViewController {
-    VisualGramActivation.shared.start()
+    VisualGramActivation.shared.start(vendorIdentifier: UIDevice.current.identifierForVendor?.uuidString, isForeground: UIApplication.shared.applicationState != .background, activeNotification: UIApplication.didBecomeActiveNotification, backgroundNotification: UIApplication.didEnterBackgroundNotification)
     let actions = VisualGramAppearanceActions(context: context)
     let signal = combineLatest(context.sharedContext.presentationData, VisualGramLocalAppearance.shared.changes, actions.expandedLists.get(), actions.activeSection.get())
     |> deliverOnMainQueue
