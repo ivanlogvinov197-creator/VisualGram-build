@@ -2,6 +2,16 @@
 from prepare_native import replace
 
 def apply_activation(root):
+    view = root / 'submodules/TelegramUI/Components/Gifts/GiftViewScreen/Sources/GiftViewScreen.swift'
+    replace(view, '''                ).startStrict(next: { [weak self] peers, starGifts, _ in
+                    if let strongSelf = self {
+''', '''                ).startStrict(next: { [weak self] peers, starGifts, _ in
+                    if let strongSelf = self {
+                        if strongSelf.isVisualGramGift && !VisualGramActivation.shared.hasAccess {
+                            strongSelf.dismiss(animated: false)
+                            return
+                        }
+''')
     buy = root / 'submodules/TelegramUI/Components/Gifts/GiftViewScreen/Sources/GiftViewBuyGift.swift'
     signature = 'func visualGramBuyLocalGift(context: AccountContext, recipientPeerId: EnginePeer.Id, gift: StarGift.UniqueGift, getController: @escaping () -> ViewController?, completion: @escaping () -> Void) -> Bool {\n'
     replace(buy, signature, signature + '''    if VisualGramLocalAppearance.shared.blocksExpiredPurchase(accountId: context.account.peerId, slug: gift.slug) {

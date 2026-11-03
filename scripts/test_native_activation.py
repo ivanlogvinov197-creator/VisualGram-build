@@ -47,12 +47,13 @@ def store_source():
     actual = (ROOT/'native/VisualGramLocalAppearance.swift').read_text(encoding='utf-8')
     update = actual[actual.index('    func updateValues('):actual.index('    public func reset(')]
     snapshot = actual[actual.index('    func snapshotValues('):actual.index('    private init()')]
+    purchase_safety = actual[actual.index('    public func blocksExpiredPurchase('):actual.index('    public var pendingScheduledGifts:')]
     stub = '    func updateValues(_ change: (inout [String: VisualGramAppearance]) -> Void) { change(&values) }'
     source = source.replace(stub, '''    private let defaults = UserDefaults(suiteName: UUID().uuidString)!
     private var revisionValue: Int32 = 0
     private let revision = ActivationTestPromise()
     static func recordGiftOperations(previous: VisualGramAppearance?, value: inout VisualGramAppearance) {}
-''' + update + snapshot)
+''' + update + snapshot + purchase_safety)
     source += r'''
 final class ActivationTestPromise { func set(_ value: Int32) {} }
 enum Queue { struct Main { func async(_ f: () -> Void) { f() } }; static func mainQueue() -> Main { Main() } }
@@ -81,15 +82,21 @@ print("PASS: real central read/write/schedule/market guards; preserved data rest
     return source
 
 def main():
+    failures=[]
     with tempfile.TemporaryDirectory() as folder:
         for name, source in [('policy',policy_source()),('store',store_source())]:
             path=Path(folder)/(name+'.swift')
             path.write_text(source,encoding='utf-8')
             output=Path(folder)/name
-            subprocess.run(['xcrun','swiftc',str(path),'-o',str(output)],check=True)
-            subprocess.run([str(output)],check=True)
+            try:
+                subprocess.run(['xcrun','swiftc',str(path),'-o',str(output)],check=True)
+                subprocess.run([str(output)],check=True)
+            except subprocess.CalledProcessError:
+                failures.append(name)
     sdk=subprocess.check_output(['xcrun','--sdk','iphoneos','--show-sdk-path'],text=True).strip()
-    subprocess.run(['xcrun','swiftc','-typecheck','-swift-version','5','-warnings-as-errors','-target','arm64-apple-ios15.0','-sdk',sdk,str(ROOT/'native/VisualGramActivation.swift')],check=True)
-    print('PASS: complete activation client typechecked against iPhone SDK')
+    result=subprocess.run(['xcrun','swiftc','-typecheck','-application-extension','-swift-version','5','-warnings-as-errors','-target','arm64-apple-ios15.0','-sdk',sdk,str(ROOT/'native/VisualGramActivation.swift')])
+    if result.returncode:failures.append('iPhone client typecheck')
+    else:print('PASS: complete activation client typechecked against iPhone SDK')
+    if failures:raise RuntimeError('Activation checks failed: '+', '.join(failures))
 
 if __name__=='__main__':main()
