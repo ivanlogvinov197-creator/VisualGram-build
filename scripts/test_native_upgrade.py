@@ -15,6 +15,7 @@ def source():
 
 STUBS = r'''
 import Foundation
+public final class VisualGramActivation { public static let shared = VisualGramActivation(); public var hasAccess = true }
 public typealias MessageTextEntity = Int
 public struct StarsAmount: Codable, Equatable { let value: Int64; let nanos: Int32 }
 public struct CurrencyAmount: Codable, Equatable { public enum Currency: Codable { case stars, ton }; let amount: StarsAmount; let currency: Currency }

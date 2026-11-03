@@ -12,6 +12,7 @@ def apply(root, project):
     core = root / "submodules/TelegramCore/Sources"
     peer = root / "submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen"
     shutil.copyfile(project / "native/VisualGramLocalAppearance.swift", core / "VisualGramLocalAppearance.swift")
+    shutil.copyfile(project / "native/VisualGramActivation.swift", core / "VisualGramActivation.swift")
     shutil.copyfile(project / "native/VisualGramGiftManagement.swift", core / "VisualGramGiftManagement.swift")
     shutil.copyfile(project / "native/VisualGramGiftTrading.swift", core / "VisualGramGiftTrading.swift")
     shutil.copyfile(project / "native/VisualGramAppearanceController.swift", peer / "Sources/VisualGramAppearanceController.swift")
@@ -270,6 +271,8 @@ private func visualGramGiftHasPremium(context: AccountContext) -> Bool {
     apply_followup(root, project)
     from apply_native_polish import apply_polish
     apply_polish(root, project)
+    from apply_native_activation import apply_activation
+    apply_activation(root)
 
 
 if __name__ == "__main__":
