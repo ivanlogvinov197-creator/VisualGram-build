@@ -80,6 +80,7 @@ private final class VisualGramAppearanceActions {
     }
 
     func toggle(_ id: Int32, value: Bool) {
+        guard VisualGramActivation.shared.hasAccess else { self.openActivation(); return }
         if id == 3 {
             if value { self.configureVerification() } else { self.update { $0.verification = nil } }
             return
@@ -102,6 +103,32 @@ private final class VisualGramAppearanceActions {
     func message(_ text: String) {
         let alert = UIAlertController(title: "VisualGram", message: text, preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "OK", style: .default))
+        self.presentNative(alert)
+    }
+
+    func openActivation() {
+        let activation = VisualGramActivation.shared
+        let alert = UIAlertController(title: "Доступ к VisualGram", message: activation.statusText + "\n\nПробный период — 24 часа. Один код активирует пожизненный доступ на одном устройстве. Для проверки нужен интернет. Настройки сохраняются при блокировке.", preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "Закрыть", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Проверить доступ", style: .default, handler: { [weak self] _ in
+            activation.refresh { [weak self] error in self?.message(error ?? activation.statusText) }
+        }))
+        alert.addAction(UIAlertAction(title: "Ввести код", style: .default, handler: { [weak self] _ in
+            guard let self = self else { return }
+            let input = UIAlertController(title: "Код активации", message: "Код будет привязан к этому устройству.", preferredStyle: .alert)
+            input.addTextField { field in
+                field.placeholder = "XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX"
+                field.autocapitalizationType = .allCharacters
+                field.autocorrectionType = .no
+                field.spellCheckingType = .no
+            }
+            input.addAction(UIAlertAction(title: "Отмена", style: .cancel))
+            input.addAction(UIAlertAction(title: "Активировать", style: .default, handler: { [weak self, weak input] _ in
+                guard let code = input?.textFields?.first?.text, !code.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { self?.message("Введите код активации."); return }
+                activation.refresh(code: code) { [weak self] error in self?.message(error ?? activation.statusText) }
+            }))
+            self.presentNative(input)
+        }))
         self.presentNative(alert)
     }
 
@@ -137,6 +164,8 @@ private final class VisualGramAppearanceActions {
     }
 
     func open(_ id: Int32) {
+        if id == 1000 { self.openActivation(); return }
+        guard VisualGramActivation.shared.hasAccess else { self.openActivation(); return }
         if (900...902).contains(id) { self.activeSection.set(id - 900); return }
 
         switch id {
@@ -613,6 +642,7 @@ private final class VisualGramAppearanceActions {
 }
 
 func visualGramAppearanceController(context: AccountContext) -> ViewController {
+    VisualGramActivation.shared.start()
     let actions = VisualGramAppearanceActions(context: context)
     let signal = combineLatest(context.sharedContext.presentationData, VisualGramLocalAppearance.shared.changes, actions.expandedLists.get(), actions.activeSection.get())
     |> deliverOnMainQueue
@@ -622,6 +652,10 @@ func visualGramAppearanceController(context: AccountContext) -> ViewController {
         func add(_ id: Int32, _ section: Int32, _ title: String, _ kind: VisualGramAppearanceEntry.Kind) {
             entries.append(VisualGramAppearanceEntry(stableId: id, section: section, title: title, kind: kind, theme: presentationData.theme))
         }
+        if !VisualGramActivation.shared.hasAccess {
+            add(1000, 0, "Активация VisualGram", .button("Введите код"))
+        } else {
+        if activeSection == -1 { add(1000, -2, "Доступ", .button("Проверить")) }
         add(7, -1, "Выбор профиля", .button(actions.targetTitle))
         if activeSection == -1 {
             add(900, 0, "Профиль", .button("")); add(901, 0, "Подарки", .button("")); add(902, 0, "Балансы", .button(""))
@@ -647,6 +681,7 @@ func visualGramAppearanceController(context: AccountContext) -> ViewController {
                 add(32, 1, "Баланс GRAM", .button(value.grams.map { VisualGramLocalAppearance.formatGrams($0) } ?? "Не задан"))
                 add(33, 1, "Оформить карточку GRAM", .button(""))
             }
+        }
         }
         entries.sort()
         let controllerState = ItemListControllerState(presentationData: ItemListPresentationData(presentationData), title: .text(activeSection == -1 ? "VisualGram" : ["Профиль", "Подарки", "Балансы"][Int(activeSection)]), leftNavigationButton: nil, rightNavigationButton: nil, backNavigationButton: ItemListBackButton(title: presentationData.strings.Common_Back))

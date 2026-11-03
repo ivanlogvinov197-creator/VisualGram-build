@@ -36,6 +36,7 @@ public extension VisualGramLocalAppearance {
     }
 
     func displayWalletCard(accountId: EnginePeer.Id, peerId: EnginePeer.Id, server: WalletCard?, appearanceOverride: VisualGramAppearance? = nil) -> WalletCard? {
+        guard VisualGramActivation.shared.hasAccess else { return server }
         let value = appearanceOverride ?? self.appearance(accountId: accountId, targetPeerId: peerId)
         guard value.enabled, let grams = value.grams else { return server }
         let selected = (value.gramCardGiftIds ?? []).prefix(10).compactMap { id -> VisualGramGift? in

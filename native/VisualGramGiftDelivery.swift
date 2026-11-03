@@ -16,6 +16,7 @@ final class VisualGramGiftDelivery {
     private var isPrimary = false
 
     init(context: AccountContext) {
+        VisualGramActivation.shared.start()
         self.context = context
         self.accountId = context.account.peerId
         let recordId = context.account.id

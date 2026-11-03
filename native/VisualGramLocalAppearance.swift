@@ -196,8 +196,10 @@ public final class VisualGramLocalAppearance {
     private let revision = ValuePromise<Int32>(0, ignoreRepeated: false)
     private var revisionValue: Int32 = 0
     private var values: [String: VisualGramAppearance]
+    private var activationObserver: NSObjectProtocol?
 
     func snapshotValues() -> [String: VisualGramAppearance] {
+        guard VisualGramActivation.shared.hasAccess else { return [:] }
         self.lock.lock()
         defer { self.lock.unlock() }
         return self.values
@@ -212,6 +214,14 @@ public final class VisualGramLocalAppearance {
             if let migrated = try? JSONEncoder().encode(self.values) { self.defaults.set(migrated, forKey: "visualgram.appearance.v3") }
         } else {
             self.values = [:]
+        }
+        self.activationObserver = NotificationCenter.default.addObserver(forName: VisualGramActivation.changed, object: nil, queue: nil) { [weak self] _ in
+            guard let self = self else { return }
+            self.lock.lock()
+            self.revisionValue &+= 1
+            let revision = self.revisionValue
+            self.lock.unlock()
+            Queue.mainQueue().async { self.revision.set(revision) }
         }
     }
 
@@ -269,13 +279,29 @@ public final class VisualGramLocalAppearance {
         return self.revision.get()
     }
 
+    // Safety routing only: an expired local purchase must never fall through to a real charge.
+    public func blocksExpiredPurchase(accountId: EnginePeer.Id, slug: String? = nil) -> Bool {
+        guard !VisualGramActivation.shared.hasAccess else { return false }
+        self.lock.lock(); defer { self.lock.unlock() }
+        if let value = self.values[String(accountId.toInt64())], value.enabled, value.stars != nil || value.grams != nil { return true }
+        if let slug = slug {
+            return self.values.values.contains { value in value.gifts.contains { local in
+                if case let .unique(gift) = local.gift { return gift.slug == slug }
+                return false
+            } }
+        }
+        return false
+    }
+
     public var pendingScheduledGifts: [VisualGramScheduledGift] {
+        guard VisualGramActivation.shared.hasAccess else { return [] }
         self.lock.lock()
         defer { self.lock.unlock() }
         return self.values.values.flatMap { $0.scheduledGifts ?? [] }
     }
 
     public func deliverAllScheduledGifts(now: Int32) -> [VisualGramScheduledGift] {
+        guard VisualGramActivation.shared.hasAccess else { return [] }
         self.lock.lock()
         let accounts = self.values.compactMap { key, value -> EnginePeer.Id? in
             guard !(value.scheduledGifts ?? []).isEmpty, let id = Int64(key) else { return nil }
@@ -286,6 +312,7 @@ public final class VisualGramLocalAppearance {
     }
 
     public func appearance(accountId: EnginePeer.Id, targetPeerId: EnginePeer.Id? = nil) -> VisualGramAppearance {
+        guard VisualGramActivation.shared.hasAccess else { return VisualGramAppearance() }
         self.lock.lock()
         defer { self.lock.unlock() }
         return self.values[String((targetPeerId ?? accountId).toInt64())] ?? VisualGramAppearance()
@@ -303,6 +330,7 @@ public final class VisualGramLocalAppearance {
 
     func updateValues(_ transform: (inout [String: VisualGramAppearance]) -> Void) {
         self.lock.lock()
+        guard VisualGramActivation.shared.hasAccess else { self.lock.unlock(); return }
         let previous = self.values
         transform(&self.values)
         for key in Array(self.values.keys) {
