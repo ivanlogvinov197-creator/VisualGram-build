@@ -7,6 +7,7 @@ import test_native_november as november
 def source():
     root=Path(__file__).resolve().parents[1]
     base=november.source().split(november.CHECKS)[0]
+    base=base.replace('public struct VisualGramAppearance: Codable {', 'public struct VisualGramAppearance: Codable {\n    var peerOverrides: [String: VisualGramAppearance]?')
     base=base.replace('public struct PeerEmojiStatus: Codable {','public struct PeerEmojiStatus: Codable, Equatable {').replace('public enum Content: Codable { case starGift','public enum Content: Codable, Equatable { case starGift')
     base=base.replace('    static func editGiftOperationNarrative(_ original: VisualGramGift, profile: Int64, counterparty: Int64?, date: Int32, text: String, values: inout [String: VisualGramAppearance]) {}\n','')
     actual=(root/'native/VisualGramLocalAppearance.swift').read_text(encoding='utf-8')
