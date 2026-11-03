@@ -5,7 +5,7 @@ These patches provide local gifts, scheduled gift delivery, profile appearance,
 chat badges and shared appearance across accounts on the same device.
 Telegram 13.1.2 adds local gift crafting, a GRAM balance and transaction history,
 NFT-decorated wallet cards, native profile/business editors, swipeable gift/username lists, second-precision scheduling and a wallet-card placement editor.
-Subscription and trial restrictions are not included.
+Visual appearance requires a signed server lease: 24-hour device trial, then a lifetime activation code bound to one device key.
 They do not change server ownership, payments, verification or subscriptions.
 The display name is Telegram. Tap Chats three times within one second between
 taps to open VisualGram. Appearance controls are hidden from Settings and profiles.
