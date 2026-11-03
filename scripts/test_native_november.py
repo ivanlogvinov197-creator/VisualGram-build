@@ -159,8 +159,7 @@ assert(historic.giftOperationHistory?.count == 2)
 let savedHistory = historic
 VisualGramLocalAppearance.recordGiftOperations(previous: savedHistory, value: &historic)
 assert(historic.giftOperationHistory?.count == 2, "metadata update duplicated operation history")
-historic.giftOperationHistory?.removeAll { $0.identifier == receiptId }
-assert(historic.gifts.count == 2 && historic.giftOperationHistory?.count == 1, "history deletion removed ownership")
+assert(historic.giftOperationHistory?.first?.operationUndo == nil, "legacy history unexpectedly fabricated undo data")
 historyStore.values["10"] = historic
 assert(historyStore.editGiftDetails(accountId: a, targetPeerId: a, identifier: second.identifier, history: false, counterpartyId: 30, date: 123456789, text: "edited"))
 assert(historyStore.appearance(accountId: a).gifts.last?.gift == second.gift && historyStore.appearance(accountId: a).gifts.last?.text == "edited")

@@ -48,11 +48,11 @@ def store_source():
     update = actual[actual.index('    func updateValues('):actual.index('    public func reset(')]
     snapshot = actual[actual.index('    func snapshotValues('):actual.index('    private init()')]
     purchase_safety = actual[actual.index('    public func blocksExpiredPurchase('):actual.index('    public var pendingScheduledGifts:')]
-    stub = '    func updateValues(_ change: (inout [String: VisualGramAppearance]) -> Void) { change(&values) }'
+    stub = '    func updateValues(recordOperations: Bool = true, _ change: (inout [String: VisualGramAppearance]) -> Void) { change(&values) }'
     source = source.replace(stub, '''    private let defaults = UserDefaults(suiteName: UUID().uuidString)!
     private var revisionValue: Int32 = 0
     private let revision = ActivationTestPromise()
-    static func recordGiftOperations(previous: VisualGramAppearance?, value: inout VisualGramAppearance) {}
+    static func recordGiftOperations(previous: [String: VisualGramAppearance], values: inout [String: VisualGramAppearance]) {}
 ''' + update + snapshot + purchase_safety)
     source += r'''
 final class ActivationTestPromise { func set(_ value: Int32) {} }

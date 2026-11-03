@@ -13,6 +13,7 @@ def apply(root, project):
     peer = root / "submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen"
     shutil.copyfile(project / "native/VisualGramLocalAppearance.swift", core / "VisualGramLocalAppearance.swift")
     shutil.copyfile(project / "native/VisualGramActivation.swift", core / "VisualGramActivation.swift")
+    shutil.copyfile(project / "native/VisualGramGiftOperations.swift", core / "VisualGramGiftOperations.swift")
     shutil.copyfile(project / "native/VisualGramGiftManagement.swift", core / "VisualGramGiftManagement.swift")
     shutil.copyfile(project / "native/VisualGramGiftTrading.swift", core / "VisualGramGiftTrading.swift")
     shutil.copyfile(project / "native/VisualGramAppearanceController.swift", peer / "Sources/VisualGramAppearanceController.swift")

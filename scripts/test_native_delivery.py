@@ -41,7 +41,7 @@ STORE = r'''
 public final class VisualGramLocalAppearance {
     private let lock = NSLock()
     var values: [String: VisualGramAppearance] = [:]
-    func updateValues(_ change: (inout [String: VisualGramAppearance]) -> Void) { change(&values) }
+    func updateValues(recordOperations: Bool = true, _ change: (inout [String: VisualGramAppearance]) -> Void) { change(&values) }
 '''
 
 CHECKS = r'''

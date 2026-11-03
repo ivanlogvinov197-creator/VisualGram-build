@@ -42,10 +42,11 @@ public struct VisualGramAppearance: Codable {
     var emojiStatus: PeerEmojiStatus?
 }
 public final class VisualGramLocalAppearance {
+    static func editGiftOperationNarrative(_ original: VisualGramGift, profile: Int64, counterparty: Int64?, date: Int32, text: String, values: inout [String: VisualGramAppearance]) {}
     var values: [String: VisualGramAppearance] = [:]
     var beforeUpdate: (() -> Void)?
     func snapshotValues() -> [String: VisualGramAppearance] { values }
-    func updateValues(_ change: (inout [String: VisualGramAppearance]) -> Void) { let hook = beforeUpdate; beforeUpdate = nil; hook?(); change(&values) }
+    func updateValues(recordOperations: Bool = true, _ change: (inout [String: VisualGramAppearance]) -> Void) { let hook = beforeUpdate; beforeUpdate = nil; hook?(); change(&values) }
     func appearance(accountId: EnginePeer.Id, targetPeerId: EnginePeer.Id? = nil) -> VisualGramAppearance { values[String((targetPeerId ?? accountId).toInt64())] ?? VisualGramAppearance() }
     func update(accountId: EnginePeer.Id, targetPeerId: EnginePeer.Id? = nil, _ change: (inout VisualGramAppearance) -> Void) { let key = String((targetPeerId ?? accountId).toInt64()); var value = values[key] ?? VisualGramAppearance(); change(&value); values[key] = value }
 '''
