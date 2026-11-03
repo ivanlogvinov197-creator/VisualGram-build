@@ -7,6 +7,10 @@ on:
         description: Validate source patches and Swift syntax without compiling IPA
         type: boolean
         default: false
+      accelerate_build:
+        description: Test resource-aware jobs and authenticated encrypted Bazel baseline
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -70,13 +74,40 @@ jobs:
           python3 scripts/test_native_november.py
           python3 scripts/test_native_activation.py
           python3 scripts/test_native_operations.py
+          export VG_OPENSSL="$(brew --prefix openssl@3)/bin/openssl"
+          python3 scripts/test_native_build_cache.py
           python3 scripts/validate_patched_swift.py telegram-native
           xcrun swiftc -frontend -parse telegram-native/submodules/TelegramUI/Sources/TelegramRootController.swift telegram-native/submodules/TabBarUI/Sources/TabBarController.swift telegram-native/submodules/Display/Source/ViewController.swift telegram-native/submodules/TelegramCore/Sources/TelegramEngine/Payments/Stars.swift telegram-native/submodules/TelegramUI/Components/Stars/StarsTransactionsScreen/Sources/StarsTransactionsScreen.swift
           mkdir -p "$RUNNER_TEMP/native-signing/profiles" "$RUNNER_TEMP/native-signing/certs"
           cp "$RUNNER_TEMP/profile.mobileprovision" "$RUNNER_TEMP/native-signing/profiles/Telegram.mobileprovision"
 
+      - name: Measure runner and select safe build parallelism
+        if: inputs.validation_only != true && inputs.accelerate_build == true
+        run: |
+          python3 scripts/native_build_performance.py telegram-native
+
+      - name: Restore encrypted Bazel baseline
+        if: inputs.validation_only != true && inputs.accelerate_build == true
+        id: sealed-cache
+        continue-on-error: true
+        timeout-minutes: 5
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/sealed-bazel-cache
+          key: vg-bazel-sealed-279f89e-xcode27.1-bazel9.2-arm64-v1
+
+      - name: Authenticate and unpack optional Bazel baseline
+        if: inputs.validation_only != true && inputs.accelerate_build == true
+        continue-on-error: true
+        timeout-minutes: 8
+        env:
+          IPA_EXPORT_PASSWORD: ${{ secrets.IPA_EXPORT_PASSWORD }}
+        run: |
+          export VG_OPENSSL="$(brew --prefix openssl@3)/bin/openssl"
+          python3 scripts/native_build_cache.py restore "$RUNNER_TEMP/telegram-bazel-cache" "$RUNNER_TEMP/sealed-bazel-cache" "$RUNNER_TEMP/native-cache-context.json"
+
       - name: Analyze full native dependency graph
-        if: inputs.validation_only == true
+        if: inputs.validation_only == true || inputs.accelerate_build == true
         run: python3 scripts/validate_native_graph.py telegram-native
 
       - name: Compile native Telegram arm64
@@ -118,6 +149,26 @@ jobs:
           path: ${{ runner.temp }}/native-artifacts/Telegram.ipa.enc
           if-no-files-found: error
           retention-days: 1
+
+      - name: Seal optional compiled dependency baseline
+        if: success() && inputs.validation_only != true && inputs.accelerate_build == true && steps.sealed-cache.outputs.cache-hit != 'true'
+        id: seal-cache
+        continue-on-error: true
+        timeout-minutes: 12
+        env:
+          IPA_EXPORT_PASSWORD: ${{ secrets.IPA_EXPORT_PASSWORD }}
+        run: |
+          export VG_OPENSSL="$(brew --prefix openssl@3)/bin/openssl"
+          python3 scripts/native_build_cache.py seal "$RUNNER_TEMP/telegram-bazel-cache" "$RUNNER_TEMP/sealed-bazel-cache" "$RUNNER_TEMP/native-cache-context.json"
+
+      - name: Save encrypted Bazel baseline once
+        if: success() && steps.seal-cache.outputs.ready == 'true'
+        continue-on-error: true
+        timeout-minutes: 8
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/sealed-bazel-cache
+          key: vg-bazel-sealed-279f89e-xcode27.1-bazel9.2-arm64-v1
 
       - name: Remove temporary credentials
         if: always()
