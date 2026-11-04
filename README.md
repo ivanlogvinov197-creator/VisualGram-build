@@ -23,12 +23,5 @@ AES-256-CBC and PBKDF2-SHA256 (200000 iterations) before upload. Only the
 encrypted file is uploaded, with one-day retention. Keep the export key private.
 The final decrypted IPA is installed on the device covered by the provisioning profile.
 
-The optional acceleration experiment selects 2, 3 or 4 Bazel jobs according to
-runner CPU/RAM. A fixed immutable baseline cache (at most 7 GiB) is compressed,
-encrypted with a domain-separated key and authenticated before restoration.
-Only its ciphertext and authenticated manifest are stored in Actions cache.
-A cache miss or rejection falls back to normal compilation; the first run only
-populates the baseline. Disabling accelerate_build restores the 2-job path.
-
 The pinned upstream project and submodules retain their original licenses.
 Full native compilation and device testing are required to confirm functionality.
