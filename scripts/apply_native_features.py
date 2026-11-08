@@ -274,6 +274,8 @@ private func visualGramGiftHasPremium(context: AccountContext) -> Bool {
     apply_polish(root, project)
     from apply_native_activation import apply_activation
     apply_activation(root)
+    from apply_native_duckgram import apply_duckgram
+    apply_duckgram(root)
 
 
 if __name__ == "__main__":

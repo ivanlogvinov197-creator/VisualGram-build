@@ -83,6 +83,14 @@ assert(!store.transferLocalGift(accountId: a, reference: ref, recipientPeerId: c
 assert(store.appearance(accountId: a).stars == 75 && store.appearance(accountId: a).starsHistory?.count == afterFee)
 let bRef = ownedB[0].reference(accountId: b)
 assert(store.localReference(slug: "Test-1") == bRef && store.canManageLocalGift(accountId: b, reference: bRef))
+let sentNFT = store.appearance(accountId: a).gifts.first { $0.direction == .sent }!
+let recipientLink = store.localGiftLink(accountId: a, reference: sentNFT.reference(accountId: a))!
+let recipientSlug = String(recipientLink.split(separator: "/").last!)
+assert(store.giftForLocalLink(slug: recipientSlug)?.0 == b)
+assert(store.giftForLocalLink(slug: recipientSlug)?.1.identifier == ownedB[0].identifier)
+assert(store.localGiftLink(accountId: b, reference: bRef) == recipientLink)
+assert(store.giftForLocalLink(slug: "Test-1") == nil)
+
 assert(!store.listLocalGift(accountId: a, reference: bRef, price: 50))
 assert(!store.listLocalGift(accountId: b, reference: bRef, price: -1))
 assert(store.listLocalGift(accountId: b, reference: bRef, price: 50))
