@@ -1,12 +1,22 @@
 """Parse every changed or newly added Swift file in the official checkout."""
 from collections import defaultdict
 from pathlib import Path
+import re
 import subprocess
 import sys
 
 
+def validate_launch_presentation(root):
+    path = Path(root) / 'submodules/TelegramUI/Sources/TelegramRootController.swift'
+    source = path.read_text(encoding='utf-8')
+    if re.search(r'\bself\.present\([^;{}]*?\banimated\s*:', source, re.DOTALL):
+        raise RuntimeError('TelegramRootController inherits a trapping UIKit present(_:animated:) override')
+    print('PASS: root controller avoids the trapping UIKit presentation API')
+
+
 def validate(root):
     root = Path(root).resolve()
+    validate_launch_presentation(root)
     changed = subprocess.check_output(['git', '-C', str(root), 'diff', '--name-only', 'HEAD', '--', '*.swift'], text=True).splitlines()
     added = subprocess.check_output(['git', '-C', str(root), 'ls-files', '--others', '--exclude-standard', '--', '*.swift'], text=True).splitlines()
     files = sorted(set(changed + added))

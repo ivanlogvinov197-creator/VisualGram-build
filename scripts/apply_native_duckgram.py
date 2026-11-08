@@ -26,15 +26,15 @@ def apply_duckgram(root):
             }
 ''')
     stars = components / 'Stars/StarsTransactionsScreen/Sources/StarsTransactionsScreen.swift'
+    replace(stars, 'import TelegramPresentationData\n', 'import TelegramPresentationData\nimport PresentationDataUtils\n')
     replace(stars, 'actionAvailable: (!premiumConfiguration.areStarsDisabled && !premiumConfiguration.isPremiumDisabled) && (!component.starsContext.ton || tonWithdrawAvailable),', 'actionAvailable: showLocalGrams || ((!premiumConfiguration.areStarsDisabled && !premiumConfiguration.isPremiumDisabled) && (!component.starsContext.ton || tonWithdrawAvailable)),')
     replace(stars, '                            actionIsEnabled: !showLocalGrams,\n', '                            actionIsEnabled: true,\n')
     replace(stars, '''                                if component.starsContext.ton {
                                     component.withdraw()
 ''', '''                                if showLocalGrams {
                                     if let controller = environment.controller() {
-                                        let alert = UIAlertController(title: "Баланс GRAM", message: "Визуальный баланс доступен только в DuckGram.", preferredStyle: .alert)
-                                        alert.addAction(UIAlertAction(title: environment.strings.Common_OK, style: .default))
-                                        controller.present(alert, animated: true)
+                                        let alert = textAlertController(context: component.context, title: "Баланс GRAM", text: "Визуальный баланс доступен только в DuckGram.", actions: [TextAlertAction(type: .defaultAction, title: environment.strings.Common_OK, action: {})])
+                                        controller.present(alert, in: .window(.root))
                                     }
                                     return
                                 }
@@ -49,17 +49,27 @@ def apply_duckgram(root):
     replace(settings, 'abs(tonState.balance.value) > 0', 'tonState.balance.value != 0', expected=2)
 
     root_controller = ui / 'Sources/TelegramRootController.swift'
+    replace(root_controller, 'import TelegramPresentationData\n', 'import TelegramPresentationData\nimport PresentationDataUtils\n')
     replace(root_controller, '    override public func containerLayoutUpdated(', '''    override public func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         VisualGramActivation.shared.start(vendorIdentifier: UIDevice.current.identifierForVendor?.uuidString, isForeground: UIApplication.shared.applicationState != .background, activeNotification: UIApplication.didBecomeActiveNotification, backgroundNotification: UIApplication.didEnterBackgroundNotification)
-        let defaults = UserDefaults.standard
-        let welcomeKey = "DuckGram.didShowWelcome.v1"
-        guard !defaults.bool(forKey: welcomeKey), self.presentedViewController == nil else { return }
-        let alert = UIAlertController(title: "Добро пожаловать в DuckGram", message: "Трижды нажми на вкладку «Чаты», чтобы открыть меню оформления.", preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: "Понятно", style: .default, handler: { _ in
+        Queue.mainQueue().async { [weak self] in
+            guard let self, self.viewIfLoaded?.window != nil, self.presentedViewController == nil,
+                  UIApplication.shared.applicationState != .background,
+                  let window = self.context.sharedContext.mainWindow else { return }
+            let defaults = UserDefaults.standard
+            let welcomeKey = "DuckGram.didShowWelcome.v1"
+            guard !defaults.bool(forKey: welcomeKey) else { return }
+            let alert = textAlertController(
+                context: self.context,
+                title: "Добро пожаловать в DuckGram",
+                text: "Трижды нажми на вкладку «Чаты», чтобы открыть меню оформления.",
+                actions: [TextAlertAction(type: .defaultAction, title: "Понятно", action: {})]
+            )
+            // NavigationController.present(_:animated:) traps; use Telegram's window overlay.
             defaults.set(true, forKey: welcomeKey)
-        }))
-        self.present(alert, animated: true)
+            window.present(alert, on: .root)
+        }
     }
 
     override public func containerLayoutUpdated(''')
