@@ -127,7 +127,7 @@ public func duckGramCraftMetadata(account: Account, gift: StarGift.UniqueGift) -
                     self.visualGramMetadata.set((visualGramGiftCollectionSample(account: context.account, giftId: gift.id) |> deliverOnMainQueue).start(next: { [weak self] template in
                         self?.visualGramUpgradeTemplate = template
                     }))
-                    self.upgradePreviewDisposable.add((duckGramUpgradeAttributes(account: context.account, giftId: gift.id) |> deliverOnMainQueue).start(next: { [weak self] attributes in
+                    self.upgradePreviewDisposable.add((TelegramCore.duckGramUpgradeAttributes(account: context.account, giftId: gift.id) |> deliverOnMainQueue).start(next: { [weak self] attributes in
                         self?.duckGramUpgradeAttributes = attributes
                     }))
                 case let .unique(gift) where local.isCrafted != true && local.craftChance == nil && !local.isBurnedCollectible:
@@ -185,3 +185,60 @@ public func duckGramCraftMetadata(account: Account, gift: StarGift.UniqueGift) -
     replace(setup, 'environment.strings.Gift_Send_Upgrade("#\\(upgradeStars)")', 'environment.strings.Gift_Send_Upgrade("#\\(localGiftPayment ? VisualGramLocalAppearance.localGiftUpgradeStars : upgradeStars)")')
     replace(setup, '                    finalPrice += upgradePrice\n', '                    finalPrice += localGiftPayment ? VisualGramLocalAppearance.localGiftUpgradeStars : upgradePrice\n')
     replace(setup, '                let amountString = presentationStringsFormattedNumber(Int32(finalPrice),', '                let amountString = presentationStringsFormattedNumber(Int32(clamping: finalPrice),')
+    apply_premium_stars(setup, components / 'Gifts/GiftOptionsScreen/Sources/GiftOptionsScreen.swift')
+
+
+def apply_premium_stars(setup, options):
+    replace(setup, 'if self.payWithStars, let starsPrice = product.starsPrice', 'if self.payWithStars || product.giftOption.currency == "XTR", let starsPrice = product.starsPrice', expected=3)
+    replace(setup, '                    if let balance = component.context.starsContext?.currentState?.balance, balance.value < starsPrice {', '''                    let wallet = VisualGramLocalAppearance.shared.appearance(accountId: component.context.account.peerId)
+                    let localPayment = wallet.enabled && wallet.stars != nil
+                    if !localPayment, let balance = component.context.starsContext?.currentState?.balance, balance.value < starsPrice {''')
+    replace(setup, '''                                    if let self {
+                                        self.proceedWithStarGift()
+                                    }
+''', '''                                    if let self {
+                                        if localPayment {
+                                            self.proceedWithLocalPremiumGift(months: product.months, price: starsPrice)
+                                        } else {
+                                            self.proceedWithStarGift()
+                                        }
+                                    }
+''')
+    replace(setup, '        private func proceedWithPremiumGift() {\n', '''        private func proceedWithLocalPremiumGift(months: Int32, price: Int64) {
+            guard !self.inProgress, let component = self.component, let environment = self.environment,
+                  let controller = environment.controller() else { return }
+            let context = component.context
+            var caption = NSAttributedString()
+            if let input = self.inputPanel.view as? MessageInputPanelComponent.View, case let .text(text) = input.getSendMessageInput() {
+                caption = text
+            }
+            let result = VisualGramLocalAppearance.shared.buyLocalPremiumGift(
+                accountId: context.account.peerId, recipientPeerId: component.peerId,
+                months: months, price: price, text: caption.string, entities: generateChatInputTextEntities(caption),
+                now: Int32(clamping: Int64(Date().timeIntervalSince1970))
+            )
+            if result == .success {
+                self.inProgress = true
+                visualGramFinishGift(context: context, peerId: component.peerId, controller: controller, completion: component.completion)
+            } else {
+                let error = result == .insufficientBalance ? "Недостаточно звёзд" : environment.strings.Gift_Send_ErrorUnknown
+                controller.present(textAlertController(context: context, title: nil, text: error, actions: [TextAlertAction(type: .defaultAction, title: environment.strings.Common_OK, action: {})]), in: .window(.root))
+            }
+        }
+
+        private func proceedWithPremiumGift() {
+''')
+    replace(setup, '                let balance = component.context.starsContext?.currentState?.balance.value ?? 0\n', '                let balance = (localGiftPayment ? wallet.stars : nil) ?? component.context.starsContext?.currentState?.balance.value ?? 0\n')
+    replace(setup, 'presentationStringsFormattedNumber(Int32(balance), environment.dateTimeFormat.groupingSeparator)', 'formatStarsAmountText(StarsAmount(value: balance, nanos: 0), dateTimeFormat: environment.dateTimeFormat)')
+    replace(setup, '                    let starsFooterRawString = environment.strings.Gift_Send_PayWithStars_Info("# \\(balanceString)").string', '                    let starsFooterRawString = localGiftPayment ? "# \\(balanceString)" : environment.strings.Gift_Send_PayWithStars_Info("# \\(balanceString)").string')
+    replace(setup, 'isOn: self.payWithStars, action:', 'isOn: self.payWithStars || product.giftOption.currency == "XTR", action:')
+    replace(setup, '                                        self.payWithStars = !self.payWithStars', '                                        guard product.giftOption.currency != "XTR" else { return }\n                                        self.payWithStars = !self.payWithStars')
+    replace(setup, '        return self.storeProduct?.id ?? (self.giftOption.storeProductId ?? "")', '''        if self.giftOption.currency == "XTR" { return "stars-\\(self.months)" }
+        return self.storeProduct?.id ?? (self.giftOption.storeProductId ?? "")''')
+    # Preserve server Stars-only offers even when the App Store catalog is missing a tier.
+    replace(options, '                        self.premiumProducts = premiumProducts.sorted(by: { $0.months < $1.months })', '''                        for option in premiumOptions where option.currency == "XTR" && option.amount > 0 {
+                            if !premiumProducts.contains(where: { $0.months == option.months && $0.starsPrice != nil }) {
+                                premiumProducts.append(PremiumGiftProduct(giftOption: option, starsGiftOption: option, storeProduct: nil, discount: nil))
+                            }
+                        }
+                        self.premiumProducts = premiumProducts.sorted(by: { $0.months < $1.months })''', expected=2)

@@ -19,10 +19,13 @@ def source():
     trading = (root / 'native/VisualGramGiftTrading.swift').read_text(encoding='utf-8')
     trading = trading[:trading.index('    func localMarketState(')] + '}\n'
     reordering = management[management.index('    static func orderedOwnedGifts('):management.index('    func chatGifts(')]
-    return STUBS + model + STORE + reordering + reference + imports + upgraded + removals + visibility + '}\n' + trading + CHECKS + PURCHASE_CHECKS + REMOVAL_CHECKS + SELLER_CHECKS
+    premium_model = appearance[appearance.index('public struct VisualGramPremiumGift:'):appearance.index('public struct VisualGramAppearance:')]
+    return STUBS + model + premium_model + STORE + reordering + reference + imports + upgraded + removals + visibility + '}\n' + trading + CHECKS + PURCHASE_CHECKS + REMOVAL_CHECKS + SELLER_CHECKS + PREMIUM_CHECKS
 
 
 STORE = r'''
+enum Namespaces { enum Peer { static let CloudUser: Int32 = 0 } }
+extension EnginePeer.Id { var namespace: Int32 { 0 } }
 public struct PeerEmojiStatus: Codable {
     public enum Content: Codable { case starGift(Int64, Int64, String, String, Int64, Int32, Int32, Int32, Int32) }
     var content: Content
@@ -32,6 +35,7 @@ public struct VisualGramAppearance: Codable {
     var premium = false
     var gifts: [VisualGramGift] = []
     var giftOperationHistory: [VisualGramGift]?
+    var premiumGifts: [VisualGramPremiumGift]?
     var giftOrder: [String]?
     var gramCardGiftIds: [String]?
     var gramCardBackgroundId: String?
@@ -50,6 +54,23 @@ public final class VisualGramLocalAppearance {
     func updateValues(recordOperations: Bool = true, _ change: (inout [String: VisualGramAppearance]) -> Void) { let hook = beforeUpdate; beforeUpdate = nil; hook?(); change(&values) }
     func appearance(accountId: EnginePeer.Id, targetPeerId: EnginePeer.Id? = nil) -> VisualGramAppearance { values[String((targetPeerId ?? accountId).toInt64())] ?? VisualGramAppearance() }
     func update(accountId: EnginePeer.Id, targetPeerId: EnginePeer.Id? = nil, _ change: (inout VisualGramAppearance) -> Void) { let key = String((targetPeerId ?? accountId).toInt64()); var value = values[key] ?? VisualGramAppearance(); change(&value); values[key] = value }
+'''
+
+PREMIUM_CHECKS = r'''
+let premiumStore = VisualGramLocalAppearance()
+premiumStore.values["10"] = .init(enabled: true, stars: 2500)
+assert(premiumStore.buyLocalPremiumGift(accountId: a, recipientPeerId: b, months: 12, price: 2500, text: "Thanks", entities: [3], now: 500) == .success)
+let premiumBuyer = premiumStore.appearance(accountId: a)
+assert(premiumBuyer.stars == 0 && premiumBuyer.starsHistory?.last?.amount == -2500)
+assert(premiumBuyer.premiumGifts?.last?.recipientId == 20 && premiumBuyer.premiumGifts?.last?.months == 12)
+assert(premiumBuyer.premiumGifts?.last?.text == "Thanks" && premiumBuyer.premiumGifts?.last?.entities == [3])
+assert(premiumStore.buyLocalPremiumGift(accountId: a, recipientPeerId: b, months: 12, price: 2500, text: "", entities: [], now: 501) == .insufficientBalance)
+assert(premiumStore.appearance(accountId: a).premiumGifts?.count == 1)
+assert(premiumStore.appearance(accountId: a).starsHistory?.count == 1)
+assert(!premiumStore.appearance(accountId: b).premium)
+let premiumReload = try JSONDecoder().decode(VisualGramAppearance.self, from: JSONEncoder().encode(premiumBuyer))
+assert(premiumReload.premiumGifts == premiumBuyer.premiumGifts)
+print("PASS: local Premium debit, insufficient funds, caption, history and persistence")
 '''
 
 

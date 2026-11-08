@@ -11,7 +11,7 @@ def source():
     appearance = (root / "native/VisualGramLocalAppearance.swift").read_text(encoding="utf-8")
     model = management[management.index("public struct VisualGramScheduledGift:"):management.index("public extension VisualGramLocalAppearance")]
     methods = management[management.index("    func chatGifts("):management.index("    static func isLocalReference(")]
-    appearance_model = appearance[appearance.index("public struct VisualGramAppearance:"):appearance.index("/// Local presentation data.")]
+    appearance_model = appearance[appearance.index("public struct VisualGramPremiumGift:"):appearance.index("/// Local presentation data.")]
     reset = appearance[appearance.index("    public func reset("):appearance.index("    public func displayPeer(")]
     migration = appearance[appearance.index("    static func migrateLegacyAppearances("):appearance.index("    public var changes:")]
     access = appearance[appearance.index("    public func appearance("):appearance.index("    func updateValues(")]
