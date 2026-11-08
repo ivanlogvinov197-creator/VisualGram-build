@@ -47,6 +47,7 @@ public struct VisualGramGift: Codable, Equatable {
         public var normalized: CardPlacement { CardPlacement(x: self.x, y: self.y, scale: self.scale, angle: self.angle) }
     }
     public struct StarsTransaction: Codable, Equatable {
+        public static let upgradeTitle = "Улучшение подарка"
         public enum Kind: String, Codable { case topUp, purchase, sale, transfer, adjustment }
         public var id: String
         public var date: Int32

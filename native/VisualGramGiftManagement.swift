@@ -325,6 +325,8 @@ public extension VisualGramLocalAppearance {
 
     // Read-only preview samples provide the original media and valid attribute combinations.
     // This creates a private visual collectible, without calling an upgrade/payment RPC.
+    static let localGiftUpgradeStars: Int64 = 25
+
     func upgradeLocalGift(accountId: EnginePeer.Id, reference: StarGiftReference?, preview: StarGiftUpgradePreview, keepOriginalInfo: Bool, template: StarGift.UniqueGift? = nil) -> ProfileGiftsContext.State.StarGift? {
         guard self.canManageLocalGift(accountId: accountId, reference: reference),
               let local = self.localGift(accountId: accountId, reference: reference), local.direction == .received,
@@ -333,7 +335,13 @@ public extension VisualGramLocalAppearance {
         var result: VisualGramGift?
         self.update(accountId: accountId, targetPeerId: messageId.peerId) { value in
             guard let index = value.gifts.firstIndex(where: { $0.identifier == local.identifier }),
-                  case .generic = value.gifts[index].gift else { return }
+                  value.gifts[index].direction == .received, value.gifts[index].isHistoryOnly != true,
+                  case .generic = value.gifts[index].gift,
+                  let balance = value.stars, balance >= Self.localGiftUpgradeStars else { return }
+            value.stars = balance - Self.localGiftUpgradeStars
+            Self.recordStarsTransaction(value: &value, amount: -Self.localGiftUpgradeStars, kind: .adjustment,
+                peerId: nil, gift: .unique(unique), title: VisualGramGift.StarsTransaction.upgradeTitle,
+                now: Int32(clamping: Int64(Date().timeIntervalSince1970)))
             value.gifts[index].localIdentifier = local.identifier
             value.gifts[index].gift = .unique(unique)
             value.gifts[index].hidesOriginalInfo = !keepOriginalInfo

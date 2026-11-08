@@ -13,6 +13,9 @@ public extension VisualGramLocalAppearance {
         }.map { entry in
             var flags: StarsContext.State.Transaction.Flags = []
             if entry.kind == .purchase || entry.kind == .sale, case .unique = entry.gift { flags.insert(.isStarGiftResale) }
+            if entry.kind == .adjustment, entry.title == VisualGramGift.StarsTransaction.upgradeTitle, case .unique = entry.gift {
+                flags.insert(.isStarGiftUpgrade)
+            }
             let peer: StarsContext.State.Transaction.Peer
             if let id = entry.peerId, let resolved = peers[id] { peer = .peer(resolved) }
             else if entry.gift != nil || entry.kind == .adjustment, let own = peers[accountId.toInt64()] { peer = .peer(own) }

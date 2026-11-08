@@ -195,7 +195,8 @@ public extension VisualGramLocalAppearance {
         guard gift.price > 0, gift.soldOut == nil, (gift.availability?.remains ?? 1) > 0,
               (gift.perUserLimit?.remains ?? 1) > 0, !gift.flags.contains(.isAuction),
               (gift.lockedUntilDate ?? 0) <= now else { return .unavailable }
-        let (price, overflow) = gift.price.addingReportingOverflow(includeUpgrade ? (gift.upgradeStars ?? 0) : 0)
+        let upgradeFee = includeUpgrade ? Self.localGiftUpgradeStars : 0
+        let (price, overflow) = gift.price.addingReportingOverflow(upgradeFee)
         guard !overflow, price > 0, price <= Int64(Int32.max) else { return .invalid }
         let purchased: StarGift
         if includeUpgrade {
@@ -213,7 +214,11 @@ public extension VisualGramLocalAppearance {
             if let availability = gift.availability, previous >= Int(availability.remains) { result = .unavailable; return }
             guard balance >= price else { result = .insufficientBalance; return }
             buyer.stars = balance - price
-            Self.recordStarsTransaction(value: &buyer, amount: -price, kind: .purchase, peerId: recipientPeerId, gift: purchased, now: now)
+            Self.recordStarsTransaction(value: &buyer, amount: -gift.price, kind: .purchase, peerId: recipientPeerId, gift: .generic(gift), now: now)
+            if includeUpgrade {
+                Self.recordStarsTransaction(value: &buyer, amount: -upgradeFee, kind: .adjustment, peerId: recipientPeerId,
+                    gift: purchased, title: VisualGramGift.StarsTransaction.upgradeTitle, now: now)
+            }
             buyer.giftPurchaseCounts = buyer.giftPurchaseCounts ?? [:]
             buyer.giftPurchaseCounts?[countKey] = Int32(clamping: previous + 1)
             values[buyerKey] = buyer
