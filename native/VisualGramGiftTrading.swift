@@ -191,6 +191,22 @@ public extension VisualGramLocalAppearance {
         return result
     }
 
+    func buyLocalPremiumGift(accountId: EnginePeer.Id, recipientPeerId: EnginePeer.Id, months: Int32, price: Int64, text: String, entities: [MessageTextEntity], now: Int32) -> VisualGramGiftPurchaseResult {
+        guard accountId != recipientPeerId, recipientPeerId.namespace == Namespaces.Peer.CloudUser,
+              months > 0, months <= Int32.max / 30, price > 0 else { return .invalid }
+        var result: VisualGramGiftPurchaseResult = .invalid
+        self.update(accountId: accountId) { buyer in
+            guard buyer.enabled, let balance = buyer.stars else { return }
+            guard balance >= price else { result = .insufficientBalance; return }
+            let gift = VisualGramPremiumGift(id: UUID().uuidString, recipientId: recipientPeerId.toInt64(), date: now, months: months, stars: price, text: text, entities: entities)
+            buyer.stars = balance - price
+            Self.recordStarsTransaction(value: &buyer, amount: -price, kind: .purchase, peerId: recipientPeerId, gift: nil, title: "Telegram Premium", now: now)
+            buyer.premiumGifts = (buyer.premiumGifts ?? []) + [gift]
+            result = .success
+        }
+        return result
+    }
+
     func buyLocalOrdinaryGift(accountId: EnginePeer.Id, recipientPeerId: EnginePeer.Id, gift: StarGift.Gift, text: String, includeUpgrade: Bool, preview: StarGiftUpgradePreview?, hasPremium: Bool = false, now: Int32, upgradeTemplate: StarGift.UniqueGift? = nil) -> VisualGramGiftPurchaseResult {
         guard gift.price > 0, gift.soldOut == nil, (gift.availability?.remains ?? 1) > 0,
               (gift.perUserLimit?.remains ?? 1) > 0, !gift.flags.contains(.isAuction),

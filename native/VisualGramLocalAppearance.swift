@@ -168,6 +168,16 @@ public struct VisualGramGift: Codable, Equatable {
     }
 }
 
+public struct VisualGramPremiumGift: Codable, Equatable {
+    public let id: String
+    public let recipientId: Int64
+    public let date: Int32
+    public let months: Int32
+    public let stars: Int64
+    public let text: String
+    public let entities: [MessageTextEntity]
+}
+
 public struct VisualGramAppearance: Codable, Equatable {
     public var enabled = false
     public var premium = false
@@ -179,6 +189,7 @@ public struct VisualGramAppearance: Codable, Equatable {
     public var emojiStatus: PeerEmojiStatus?
     public var gifts: [VisualGramGift] = []
     public var giftOperationHistory: [VisualGramGift]?
+    public var premiumGifts: [VisualGramPremiumGift]?
     public var giftOrder: [String]?
     public var stars: Int64?
     public var grams: Int64?
