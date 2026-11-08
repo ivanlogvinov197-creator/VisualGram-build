@@ -45,6 +45,7 @@ public final class VisualGramActivation {
     private var message = "Для проверки доступа подключитесь к интернету."
     private var started = false
     private var foreground = false
+    private var reportedAccess = false
     private var vendorIdentifier: String?
     private var inFlight = false
     private var generation = 0
@@ -73,9 +74,9 @@ public final class VisualGramActivation {
         self.lock.lock(); defer { self.lock.unlock() }
         guard let grant = self.grant else { return self.message }
         guard grant.permitsAccess(startUptime: self.grantUptime, uptime: ProcessInfo.processInfo.systemUptime) else {
-            return grant.status == "expired" ? "Пробный день закончился. Введите код активации." : "Требуется проверка доступа через интернет."
+            return grant.status == "expired" ? "Срок доступа истёк. Введите код активации." : "Требуется проверка доступа через интернет."
         }
-        if grant.status == "active" { return "Пожизненный доступ активирован для этого устройства." }
+        if grant.status == "active" { return "Доступ активирован для этого устройства." }
         let elapsed = max(0, ProcessInfo.processInfo.systemUptime - self.grantUptime)
         let remaining = max(0, Double(grant.trial_until - grant.server_time) - elapsed)
         return "Пробный доступ: осталось \(Int(remaining) / 3600) ч \((Int(remaining) % 3600) / 60) мин."
@@ -89,7 +90,7 @@ public final class VisualGramActivation {
         self.vendorIdentifier = vendorIdentifier
         self.observers.append(NotificationCenter.default.addObserver(forName: backgroundNotification, object: nil, queue: .main) { [weak self] _ in
             self?.foreground = false
-            self?.invalidate(message: "Требуется проверка доступа через интернет.")
+
         })
         self.observers.append(NotificationCenter.default.addObserver(forName: activeNotification, object: nil, queue: .main) { [weak self] _ in
             self?.foreground = true
@@ -102,6 +103,9 @@ public final class VisualGramActivation {
     }
 
     private func notify() {
+        let access = self.hasAccess
+        guard access != self.reportedAccess else { return }
+        self.reportedAccess = access
         NotificationCenter.default.post(name: Self.changed, object: nil)
     }
 
@@ -121,8 +125,8 @@ public final class VisualGramActivation {
         let age = ProcessInfo.processInfo.systemUptime - self.grantUptime
         let hasGrant = self.grant != nil
         self.lock.unlock()
-        if !self.hasAccess && hasGrant { self.notify() }
-        if !self.inFlight && (!hasGrant || age >= 120) { self.refresh() }
+        self.notify()
+        if !self.inFlight && (!hasGrant || !self.hasAccess || age >= 120) { self.refresh() }
     }
 
     private func identity() throws -> (SecKey, Data, String) {
@@ -237,7 +241,13 @@ public final class VisualGramActivation {
 
     private func finish(error: Error, completion: ((String?) -> Void)?) {
         let text = (error as NSError).domain == "VisualGramActivation" ? error.localizedDescription : "Сервер недоступен. Подключитесь к интернету и повторите проверку."
-        self.invalidate(message:text)
+        if (error as NSError).domain == "VisualGramActivation" && (error as NSError).code == 403 && text == "Доступ для этого устройства отозван." {
+            self.invalidate(message: text)
+        } else {
+            self.inFlight = false
+            self.lock.lock(); self.message = text; self.lock.unlock()
+            self.notify()
+        }
         completion?(text)
     }
 }

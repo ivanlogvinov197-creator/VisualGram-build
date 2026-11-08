@@ -101,15 +101,19 @@ private final class VisualGramAppearanceActions {
     }
 
     func message(_ text: String) {
-        let alert = UIAlertController(title: "VisualGram", message: text, preferredStyle: .alert)
+        let alert = UIAlertController(title: "DuckGram", message: text, preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "OK", style: .default))
         self.presentNative(alert)
     }
 
     func openActivation() {
         let activation = VisualGramActivation.shared
-        let alert = UIAlertController(title: "Доступ к VisualGram", message: activation.statusText + "\n\nПробный период — 24 часа. Один код активирует пожизненный доступ на одном устройстве. Для проверки нужен интернет. Настройки сохраняются при блокировке.", preferredStyle: .alert)
+        let alert = UIAlertController(title: "Доступ к DuckGram", message: activation.statusText + "\n\nПробный период — 24 часа. Код активирует доступ на одном устройстве. Для проверки нужен интернет. Настройки сохраняются при блокировке.", preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "Закрыть", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Купить доступ в боте", style: .default, handler: { [weak self] _ in
+            guard let self, let controller = self.controller else { return }
+            self.context.sharedContext.openExternalUrl(context: self.context, urlContext: .generic, url: "https://t.me/duckkgrambot", forceExternal: false, presentationData: self.context.sharedContext.currentPresentationData.with { $0 }, navigationController: controller.navigationController as? NavigationController, dismissInput: {})
+        }))
         alert.addAction(UIAlertAction(title: "Проверить доступ", style: .default, handler: { [weak self] _ in
             activation.refresh { [weak self] error in self?.message(error ?? activation.statusText) }
         }))
@@ -720,7 +724,7 @@ func visualGramAppearanceController(context: AccountContext) -> ViewController {
             entries.append(VisualGramAppearanceEntry(stableId: id, section: section, title: title, kind: kind, theme: presentationData.theme))
         }
         if !VisualGramActivation.shared.hasAccess {
-            add(1000, 0, "Активация VisualGram", .button("Введите код"))
+            add(1000, 0, "Активация DuckGram", .button("Введите код"))
         } else {
         if activeSection == -1 { add(1000, -2, "Доступ", .button("Проверить")) }
         add(7, -1, "Выбор профиля", .button(actions.targetTitle))
@@ -752,7 +756,7 @@ func visualGramAppearanceController(context: AccountContext) -> ViewController {
         }
         }
         entries.sort()
-        let controllerState = ItemListControllerState(presentationData: ItemListPresentationData(presentationData), title: .text(activeSection == -1 ? "VisualGram" : ["Профиль", "Подарки", "Балансы"][Int(activeSection)]), leftNavigationButton: nil, rightNavigationButton: nil, backNavigationButton: ItemListBackButton(title: presentationData.strings.Common_Back))
+        let controllerState = ItemListControllerState(presentationData: ItemListPresentationData(presentationData), title: .text(activeSection == -1 ? "DuckGram" : ["Профиль", "Подарки", "Балансы"][Int(activeSection)]), leftNavigationButton: nil, rightNavigationButton: nil, backNavigationButton: ItemListBackButton(title: presentationData.strings.Common_Back))
         let listState = ItemListNodeState(presentationData: ItemListPresentationData(presentationData), entries: entries, style: .blocks, animateChanges: false)
         return (controllerState, (listState, actions))
     }

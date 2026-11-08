@@ -19,7 +19,7 @@ public extension VisualGramLocalAppearance {
             else { peer = .premiumBot }
             return StarsContext.State.Transaction(
                 flags: flags, id: (ton ? "vg-grams:" : "vg-stars:") + entry.id,
-                count: CurrencyAmount(amount: StarsAmount(value: entry.amount, nanos: 0), currency: ton ? .ton : .stars),
+                count: CurrencyAmount(amount: StarsAmount(value: max(-Int64.max, entry.amount), nanos: 0), currency: ton ? .ton : .stars),
                 date: entry.date, peer: peer, title: entry.title ?? (entry.kind == .adjustment && entry.amount < 0 ? (ton ? "Списание GRAM" : "Списание звёзд") : nil), description: nil, photo: nil,
                 transactionDate: entry.date, transactionUrl: nil, paidMessageId: nil, giveawayMessageId: nil,
                 media: [], subscriptionPeriod: nil, starGift: entry.gift, floodskipNumber: nil,

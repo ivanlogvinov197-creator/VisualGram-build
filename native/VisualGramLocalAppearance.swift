@@ -124,6 +124,10 @@ public struct VisualGramGift: Codable, Equatable {
         return "\(self.direction.rawValue):\(self.counterpartyId ?? 0):\(self.assetIdentifier)"
     }
 
+    public var isBurnedCollectible: Bool {
+        if case let .unique(gift) = self.gift { return gift.flags.contains(.isBurned) }
+        return false
+    }
     public var craftChance: Int32? { if case let .unique(gift) = self.gift { return gift.craftChancePermille }; return nil }
 
     public var assetIdentifier: String {
@@ -159,7 +163,7 @@ public struct VisualGramGift: Codable, Equatable {
         if case let .generic(gift) = self.gift { canUpgrade = gift.upgradeStars != nil && self.direction == .received && self.isHistoryOnly != true } else { canUpgrade = false }
         let transferStars: Int64?
         if case .unique = self.gift, self.direction == .received, self.isHistoryOnly != true { transferStars = VisualGramLocalAppearance.localGiftTransferStars } else { transferStars = nil }
-        return ProfileGiftsContext.State.StarGift(gift: self.displayGift(accountId: accountId), reference: self.reference(accountId: accountId), fromPeer: sender, date: self.date, text: self.text.isEmpty ? nil : self.text, entities: self.textEntities, nameHidden: self.nameHidden ?? false, savedToProfile: self.savedToProfile ?? true, pinnedToTop: self.pinnedToTop ?? false, convertStars: nil, canUpgrade: canUpgrade, canExportDate: nil, upgradeStars: nil, transferStars: transferStars, canTransferDate: nil, canResaleDate: nil, collectionIds: self.collectionIds, prepaidUpgradeHash: nil, upgradeSeparate: false, dropOriginalDetailsStars: nil, number: nil, isRefunded: false, canCraftAt: ((self.direction == .received && self.isHistoryOnly != true && self.isCrafted != true && (self.craftChance ?? 0) > 0) ? (self.canCraftAt ?? 0) : nil))
+        return ProfileGiftsContext.State.StarGift(gift: self.displayGift(accountId: accountId), reference: self.reference(accountId: accountId), fromPeer: sender, date: self.date, text: self.text.isEmpty ? nil : self.text, entities: self.textEntities, nameHidden: self.nameHidden ?? false, savedToProfile: self.savedToProfile ?? true, pinnedToTop: self.pinnedToTop ?? false, convertStars: nil, canUpgrade: canUpgrade, canExportDate: nil, upgradeStars: nil, transferStars: transferStars, canTransferDate: nil, canResaleDate: nil, collectionIds: self.collectionIds, prepaidUpgradeHash: nil, upgradeSeparate: false, dropOriginalDetailsStars: nil, number: nil, isRefunded: false, canCraftAt: ((self.direction == .received && self.isHistoryOnly != true && self.isCrafted != true && (self.craftChance ?? 0) > 0 && !self.isBurnedCollectible) ? (self.canCraftAt ?? 0) : nil))
     }
 }
 

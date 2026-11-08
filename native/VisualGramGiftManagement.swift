@@ -351,10 +351,9 @@ public extension VisualGramLocalAppearance {
         let total = max(1, template?.availability.total ?? generic.availability?.total ?? 100000)
         let number = template?.number ?? Int32.random(in: 1 ... total)
         let title = template?.title ?? generic.title ?? "Gift"
-        let prefix = title.filter { $0.isASCII && ($0.isLetter || $0.isNumber) }
         return StarGift.UniqueGift(id: -Int64.random(in: 1 ... Int64.max), giftId: generic.id,
             title: title, number: number,
-            slug: template?.slug ?? "\(prefix.isEmpty ? "Gift" : prefix)-\(number)", owner: .peerId(ownerId), attributes: template.map { $0.attributes.filter { $0.attributeType != .originalInfo } } ?? [model, pattern, backdrop],
+            slug: template?.slug ?? "DuckGramGift-\(UUID().uuidString)", owner: .peerId(ownerId), attributes: [model, pattern, backdrop],
             availability: .init(issued: 1, total: total), giftAddress: nil, resellAmounts: nil,
             resellForTonOnly: false, releasedBy: generic.releasedBy, valueAmount: nil, valueCurrency: nil,
             valueUsdAmount: nil, flags: [], themePeerId: nil, peerColor: nil, hostPeerId: nil,

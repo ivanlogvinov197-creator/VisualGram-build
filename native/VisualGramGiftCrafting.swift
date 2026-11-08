@@ -11,11 +11,18 @@ public extension VisualGramLocalAppearance {
             return unique.slug == gift.slug
         })?.reference(accountId: accountId)
     }
-    func updateLocalCraftMetadata(accountId: EnginePeer.Id, reference: StarGiftReference, gift: StarGift.UniqueGift) {
+    func updateLocalCraftMetadata(accountId: EnginePeer.Id, reference: StarGiftReference, gift: StarGift.UniqueGift, collectionFallback: Bool = false) {
         self.update(accountId: accountId) { value in
             guard let index = value.gifts.firstIndex(where: { $0.reference(accountId: accountId) == reference && $0.direction == .received && $0.isHistoryOnly != true && $0.isCrafted != true }),
                   case let .unique(existing) = value.gifts[index].gift,
-                  (existing.slug == gift.slug || (existing.id < 0 && UUID(uuidString: String(existing.slug.dropFirst(5))) != nil)), existing.giftId == gift.giftId else { return }
+                  existing.giftId == gift.giftId, !existing.flags.contains(.isBurned) else { return }
+            let isLegacy = existing.id < 0 && existing.slug.hasPrefix("Gift-") && UUID(uuidString: String(existing.slug.dropFirst(5))) != nil
+            if collectionFallback && !isLegacy {
+                guard existing.craftChancePermille == nil, (gift.craftChancePermille ?? 0) > 0 else { return }
+                value.gifts[index].gift = .unique(StarGift.UniqueGift(id: existing.id, giftId: existing.giftId, title: existing.title, number: existing.number, slug: existing.slug, owner: existing.owner, attributes: existing.attributes, availability: existing.availability, giftAddress: existing.giftAddress, resellAmounts: existing.resellAmounts, resellForTonOnly: existing.resellForTonOnly, releasedBy: existing.releasedBy, valueAmount: existing.valueAmount, valueCurrency: existing.valueCurrency, valueUsdAmount: existing.valueUsdAmount, flags: existing.flags, themePeerId: existing.themePeerId, peerColor: existing.peerColor, hostPeerId: existing.hostPeerId, minOfferStars: existing.minOfferStars, craftChancePermille: gift.craftChancePermille))
+                return
+            }
+            guard existing.slug == gift.slug || isLegacy else { return }
             // Refresh catalog metadata only. Keep local receipt, ownership, order,
             // sale price and any separate locally configured unlock date.
             guard !value.gifts.contains(where: { $0.identifier != value.gifts[index].identifier && $0.direction == .received && $0.isHistoryOnly != true && $0.assetIdentifier == "unique:" + gift.slug }) else { return }

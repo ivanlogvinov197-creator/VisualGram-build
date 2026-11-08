@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 public enum VisualGramGiftPurchaseResult: Equatable {
     case success, insufficientBalance, unavailable, priceChanged, invalid
@@ -43,6 +44,45 @@ public extension VisualGramLocalAppearance {
                 if case let .unique(gift) = local.gift, gift.slug == slug {
                     return local.reference(accountId: EnginePeer.Id(rawId))
                 }
+            }
+        }
+        return nil
+    }
+
+    func localGiftLink(accountId: EnginePeer.Id, reference: StarGiftReference?) -> String? {
+        guard case let .message(id) = reference, let local = self.localGift(accountId: accountId, reference: reference),
+              case .unique = local.gift else { return nil }
+        var owner = id.peerId
+        var gift = local
+        if local.direction == .sent, let recipient = local.counterpartyId {
+            owner = EnginePeer.Id(recipient)
+            let receivedGifts = self.appearance(accountId: accountId, targetPeerId: owner).gifts.filter {
+                $0.direction == .received && $0.isHistoryOnly != true
+            }
+            guard let received = receivedGifts.first(where: { $0.identifier == local.identifier })
+                    ?? receivedGifts.first(where: { $0.assetIdentifier == local.assetIdentifier }) else { return nil }
+            gift = received
+        }
+        guard gift.direction == .received, gift.isHistoryOnly != true else { return nil }
+        return "https://t.me/nft/" + Self.localGiftSlug(owner: owner, gift: gift)
+    }
+
+    private static func localGiftSlug(owner: EnginePeer.Id, gift: VisualGramGift) -> String {
+        let identity = Data("\(owner.toInt64()):\(gift.identifier)".utf8)
+        let digest = SHA256.hash(data: identity).map { String(format: "%02x", $0) }.joined()
+        return "DuckGram_" + digest
+    }
+
+    func giftForLocalLink(slug: String) -> (EnginePeer.Id, VisualGramGift)? {
+        guard slug.hasPrefix("DuckGram_"), slug.utf8.count == 73 else { return nil }
+        for (key, value) in self.snapshotValues() {
+            guard value.enabled, let rawId = Int64(key) else { continue }
+            let owner = EnginePeer.Id(rawId)
+            if let gift = value.gifts.first(where: {
+                guard $0.direction == .received, $0.isHistoryOnly != true, case .unique = $0.gift else { return false }
+                return Self.localGiftSlug(owner: owner, gift: $0) == slug
+            }) {
+                return (owner, gift)
             }
         }
         return nil
