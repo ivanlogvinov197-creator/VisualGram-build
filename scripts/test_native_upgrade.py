@@ -10,7 +10,9 @@ def source():
     management = (root / "native/VisualGramGiftManagement.swift").read_text(encoding="utf-8")
     model = appearance[appearance.index("public struct VisualGramGift:"):appearance.index("    public func displayGift(")] + "}\n"
     reference = management[management.index("    static func isLocalReference("):management.index("    @discardableResult\n    func updateGift(")]
-    return STUBS + model + STORE + reference + "}\n" + CHECKS
+    trading = (root / "native/VisualGramGiftTrading.swift").read_text(encoding="utf-8")
+    ledger = trading[trading.index("    static func recordStarsTransaction("):trading.index("    func localReference(messageId:")]
+    return STUBS + model + STORE + reference + ledger + "}\n" + CHECKS
 
 
 STUBS = r'''
@@ -77,7 +79,11 @@ public extension VisualGramGift {
 '''
 
 STORE = r'''
-public struct VisualGramAppearance: Codable { var gifts: [VisualGramGift] = [] }
+public struct VisualGramAppearance: Codable {
+    var gifts: [VisualGramGift] = []
+    var stars: Int64? = 25
+    var starsHistory: [VisualGramGift.StarsTransaction]?
+}
 public final class VisualGramLocalAppearance {
     var values: [Int64: VisualGramAppearance] = [:]
     func canManageLocalGift(accountId: EnginePeer.Id, reference: StarGiftReference?) -> Bool {
@@ -102,6 +108,10 @@ let attributes: [StarGift.UniqueGift.Attribute] = [.model(1), .model(2), .patter
 assert(store.upgradeLocalGift(accountId: viewer, reference: reference, preview: .init(attributes: [.model(1)]), keepOriginalInfo: true) == nil, "incomplete preview upgraded")
 assert(store.localGift(accountId: viewer, reference: reference)?.gift == original.gift)
 assert(store.upgradeLocalGift(accountId: viewer, reference: reference, preview: .init(attributes: attributes), keepOriginalInfo: true) == nil, "non-owner upgraded")
+store.values[10]?.stars = 24
+assert(store.upgradeLocalGift(accountId: owner, reference: reference, preview: .init(attributes: attributes), keepOriginalInfo: true) == nil)
+assert(store.values[10]?.stars == 24 && store.values[10]?.starsHistory == nil)
+store.values[10]?.stars = 25
 let result = store.upgradeLocalGift(accountId: owner, reference: reference, preview: .init(attributes: attributes), keepOriginalInfo: false)!
 assert(result.owner == owner && result.reference == reference, "owner or stable reference changed")
 let upgraded = store.localGift(accountId: viewer, reference: reference)!
@@ -114,6 +124,9 @@ if case let .unique(unique) = upgraded.gift {
 } else { assertionFailure("not upgraded") }
 assert(store.appearance(accountId: viewer).gifts.isEmpty, "viewer identity received owner's gift")
 assert(store.upgradeLocalGift(accountId: owner, reference: reference, preview: .init(attributes: attributes), keepOriginalInfo: true) == nil, "upgraded twice")
+assert(store.values[10]?.stars == 0)
+assert(store.values[10]?.starsHistory?.map { $0.amount } == [-25])
+assert(store.values[10]?.starsHistory?.first?.title == "Улучшение подарка")
 let data = try JSONEncoder().encode(store.values)
 store.values = try JSONDecoder().decode([Int64: VisualGramAppearance].self, from: data)
 assert(store.localGift(accountId: viewer, reference: reference)?.gift == upgraded.gift, "upgrade lost after restart")

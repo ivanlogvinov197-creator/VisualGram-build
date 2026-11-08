@@ -83,12 +83,14 @@ let ordinary=VisualGramGift(gift:.generic(.init(id:42,title:"Cake",availability:
 upgrade.values["10"] = .init(enabled:true,gifts:[ordinary],stars:100)
 upgrade.values["10"]?.giftOrder=[ordinary.identifier]
 assert(upgrade.upgradeLocalGift(accountId:a,reference:ordinary.reference(accountId:a),preview:.init(attributes:[.model(1),.pattern(2),.backdrop(3)]),keepOriginalInfo:true,template:nft(42)) != nil)
+assert(upgrade.appearance(accountId:a).stars==75 && upgrade.appearance(accountId:a).starsHistory?.last?.amount == -25)
 let upgraded=operations(upgrade,a).first { $0.operationKind == .upgrade }!
 assert(upgraded.operationInputs?.count==1 && upgraded.operationResult != nil && upgraded.date != ordinary.date)
 let upgradeReload=VisualGramLocalAppearance();upgradeReload.values=try! JSONDecoder().decode([String:VisualGramAppearance].self,from:JSONEncoder().encode(upgrade.values))
 assert(operations(upgradeReload,a).contains { $0.operationKind == .upgrade }, "upgrade kind lost after restart")
 if case .success = cancel(upgrade,a,upgraded) {} else { assertionFailure("upgrade rollback") }
 assert(owned(upgrade,a).first?.gift==ordinary.gift && owned(upgrade,a).first?.text=="caption")
+assert(upgrade.appearance(accountId:a).stars==100 && upgrade.appearance(accountId:a).starsHistory?.isEmpty != false)
 assert(upgrade.appearance(accountId:a).giftOrder==[ordinary.identifier], "upgrade rollback lost unchanged custom order")
 
 // Sending a crafted asset by import is a delivery, never a new craft. Mirrored operation cancellation removes both chat records.

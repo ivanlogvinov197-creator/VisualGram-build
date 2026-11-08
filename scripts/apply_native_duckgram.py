@@ -149,7 +149,20 @@ public func duckGramCraftMetadata(account: Account, gift: StarGift.UniqueGift) -
     start = text.index('            if self.isVisualGramGift, let arguments = self.subject.arguments, case let .generic(generic) = arguments.gift {', text.index('        func commitUpgrade()'))
     end = text.index('                guard !self.inProgress, self.visualGramCanManage, let reference', start)
     text = text[:start] + '            if self.isVisualGramGift, let arguments = self.subject.arguments, case .generic = arguments.gift {\n' + text[end:]
+    text = text.replace('                guard !self.inProgress, self.visualGramCanManage, let reference = self.visualGramReference,', '''                guard !self.inProgress, self.visualGramCanManage else { return }
+                let wallet = VisualGramLocalAppearance.shared.appearance(accountId: self.context.account.peerId)
+                guard (wallet.stars ?? 0) >= VisualGramLocalAppearance.localGiftUpgradeStars else {
+                    let strings = self.context.sharedContext.currentPresentationData.with { $0 }.strings
+                    self.getController()?.present(textAlertController(context: self.context, title: nil, text: "Недостаточно звёзд для улучшения", actions: [TextAlertAction(type: .defaultAction, title: strings.Common_OK, action: {})]), in: .window(.root))
+                    return
+                }
+                guard let reference = self.visualGramReference,''', 1)
     text = text.replace('preview: preview, keepOriginalInfo: self.keepOriginalInfo, template: self.visualGramUpgradeTemplate)', 'preview: self.duckGramUpgradeAttributes.map { preview.withAttributes($0) } ?? preview, keepOriginalInfo: self.keepOriginalInfo, template: self.visualGramUpgradeTemplate)', 1)
+    text = text.replace('''                if state.isVisualGramGift { upgradeString = strings.Gift_Upgrade_Upgrade }
+                let buttonTitle = subject.arguments?.upgradeStars != nil ? strings.Gift_Upgrade_Confirm : upgradeString''', '''                if state.isVisualGramGift {
+                    upgradeString = "Улучшить за \\(VisualGramLocalAppearance.localGiftUpgradeStars) звезд"
+                }
+                let buttonTitle = !state.isVisualGramGift && subject.arguments?.upgradeStars != nil ? strings.Gift_Upgrade_Confirm : upgradeString''', 1)
     start = text.index('        func openMore() {')
     before, menu = text[:start], text[start:]
     menu = menu.replace('            let link = "https://t.me/nft/\\(gift.slug)"', '''            let link: String? = self.isVisualGramGift
@@ -159,4 +172,16 @@ public func duckGramCraftMetadata(account: Account, gift: StarGift.UniqueGift) -
     b = menu.index('                items.append(.action(ContextMenuActionItem(text: presentationData.strings.Gift_View_Context_Share', a)
     menu = menu[:a] + '                if let link {\n' + ''.join('    ' + line if line.strip() else line for line in menu[a:b].splitlines(keepends=True)).rstrip() + '\n                }\n\n' + menu[b:]
     text = before + menu
+    text = text.replace('if let _ = state.subject.arguments?.canCraftDate {', 'if (!state.isVisualGramGift || state.visualGramCanManage), let _ = state.subject.arguments?.canCraftDate {', 1)
+    text = text.replace('if VisualGramLocalAppearance.isLocalReference(self.subject.arguments?.reference), !VisualGramLocalAppearance.shared.canManageLocalGift(accountId: self.context.account.peerId, reference: self.subject.arguments?.reference) { return }', 'if self.isVisualGramGift && !self.visualGramCanManage { return }', 1)
     view.write_text(text, encoding='utf-8', newline='\n')
+
+
+    setup = components / 'Gifts/GiftSetupScreen/Sources/GiftSetupScreen.swift'
+    replace(setup, '            let isSelfGift = component.peerId == component.context.account.peerId\n', '''            let isSelfGift = component.peerId == component.context.account.peerId
+            let wallet = VisualGramLocalAppearance.shared.appearance(accountId: component.context.account.peerId)
+            let localGiftPayment = wallet.enabled && wallet.stars != nil
+''')
+    replace(setup, 'environment.strings.Gift_Send_Upgrade("#\\(upgradeStars)")', 'environment.strings.Gift_Send_Upgrade("#\\(localGiftPayment ? VisualGramLocalAppearance.localGiftUpgradeStars : upgradeStars)")')
+    replace(setup, '                    finalPrice += upgradePrice\n', '                    finalPrice += localGiftPayment ? VisualGramLocalAppearance.localGiftUpgradeStars : upgradePrice\n')
+    replace(setup, '                let amountString = presentationStringsFormattedNumber(Int32(finalPrice),', '                let amountString = presentationStringsFormattedNumber(Int32(clamping: finalPrice),')

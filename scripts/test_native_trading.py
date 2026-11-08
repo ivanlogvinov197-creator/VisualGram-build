@@ -12,7 +12,8 @@ def source():
     management = (root / 'native/VisualGramGiftManagement.swift').read_text(encoding='utf-8')
     reference = management[management.index('    static func isLocalReference('):management.index('    // Read-only preview samples')]
     imports = management[management.index('    func addGift('):management.index('    func scheduleGift(')]
-    upgraded = management[management.index('    static func makeUpgradedGift('):management.index('    @discardableResult\n    func updateGift(')]
+    price = management[management.index('    static let localGiftUpgradeStars:'):management.index('    func upgradeLocalGift(')]
+    upgraded = price + management[management.index('    static func makeUpgradedGift('):management.index('    @discardableResult\n    func updateGift(')]
     visibility = management[management.index('    func profileState('):management.index('    func collection(')]
     removals = management[management.index('    func removeLocalGifts('):management.index('    func reorderGifts(')]
     trading = (root / 'native/VisualGramGiftTrading.swift').read_text(encoding='utf-8')
@@ -154,10 +155,14 @@ assert(buyBear(expensive) == .invalid)
 expensive.price = 100
 assert(buyBear(expensive) == .insufficientBalance && purchases.appearance(accountId: a).stars == before)
 assert(buyBear(bear, upgrade: true, preview: .init(attributes: [.model(1)])) == .unavailable)
+let previousUpgradeBalance = purchases.appearance(accountId: a).stars!
 let preview = StarGiftUpgradePreview(attributes: [.model(1), .pattern(2), .backdrop(3)])
 assert(buyBear(bear, upgrade: true, preview: preview) == .success)
 if case let .unique(value) = purchases.appearance(accountId: b).gifts.last!.gift { assert(value.owner == .peerId(b) && value.giftId == bear.id) } else { assertionFailure("prepaid upgrade did not create NFT") }
-assert(purchases.appearance(accountId: b).gifts.last?.purchaseStars == 20)
+assert(purchases.appearance(accountId: b).gifts.last?.purchaseStars == 40)
+assert(purchases.appearance(accountId: a).stars == previousUpgradeBalance - 40)
+assert(purchases.appearance(accountId: a).starsHistory?.last?.amount == -25)
+assert(purchases.appearance(accountId: a).starsHistory?.last?.title == "Улучшение подарка")
 let transferredPurchase = store.appearance(accountId: c).gifts.first { $0.isHistoryOnly != true }!
 assert(transferredPurchase.purchaseStars == 50 && transferredPurchase.purchaseBuyerId == 30)
 let hidden = receivedBears[0]

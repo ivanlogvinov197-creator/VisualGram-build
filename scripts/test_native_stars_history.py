@@ -27,7 +27,7 @@ public struct CurrencyAmount { public enum Currency { case stars, ton }; public 
 public enum StarsTransactionsContext { public enum Mode { case all, incoming, outgoing } }
 public enum StarsContext { public enum State {
     public struct Transaction {
-        public struct Flags: OptionSet { public var rawValue: Int32; public init(rawValue: Int32) { self.rawValue = rawValue }; public static let isStarGiftResale = Flags(rawValue: 512) }
+        public struct Flags: OptionSet { public var rawValue: Int32; public init(rawValue: Int32) { self.rawValue = rawValue }; public static let isStarGiftResale = Flags(rawValue: 512); static let isStarGiftUpgrade = Flags(rawValue: 2) }
         public enum Peer: Equatable { case peer(EnginePeer), premiumBot }
         public let flags: Flags; public let id: String; public let count: CurrencyAmount; public let date: Int32; public let peer: Peer; public let title: String?; public let starGift: StarGift?
         public init(flags: Flags, id: String, count: CurrencyAmount, date: Int32, peer: Peer, title: String?, description: Any?, photo: Any?, transactionDate: Any?, transactionUrl: Any?, paidMessageId: Any?, giveawayMessageId: Any?, media: [Int], subscriptionPeriod: Any?, starGift: StarGift?, floodskipNumber: Any?, starrefCommissionPermille: Any?, starrefPeerId: Any?, starrefAmount: Any?, paidMessageCount: Any?, premiumGiftMonths: Any?, adsProceedsFromDate: Any?, adsProceedsToDate: Any?) {
