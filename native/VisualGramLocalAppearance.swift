@@ -377,16 +377,19 @@ public final class VisualGramLocalAppearance {
     }
 
     public func reset(accountId: EnginePeer.Id, targetPeerId: EnginePeer.Id? = nil) {
-        self.update(accountId: accountId, targetPeerId: targetPeerId) { value in
-            let template = value.majorTemplate
-            let scheduled = value.scheduledGifts
-            value = VisualGramAppearance()
-            value.majorTemplate = template
-            value.scheduledGifts = scheduled
-        }
-        self.updateValues { values in
+        let target = (targetPeerId ?? accountId).toInt64()
+        let targetKey = String(target)
+        self.updateValues(recordOperations: false) { values in
             for key in Array(values.keys) {
-                values[key]?.scheduledGifts?.removeAll { $0.targetPeerId == (targetPeerId ?? accountId).toInt64() }
+                values[key]?.scheduledGifts?.removeAll { $0.targetPeerId == target }
+            }
+            let remaining = values[targetKey]?.scheduledGifts ?? []
+            if remaining.isEmpty {
+                values.removeValue(forKey: targetKey)
+            } else {
+                var cleared = VisualGramAppearance()
+                cleared.scheduledGifts = remaining
+                values[targetKey] = cleared
             }
         }
     }

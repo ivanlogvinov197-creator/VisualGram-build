@@ -195,13 +195,21 @@ public extension VisualGramLocalAppearance {
         guard accountId != recipientPeerId, recipientPeerId.namespace == Namespaces.Peer.CloudUser,
               months > 0, months <= Int32.max / 30, price > 0 else { return .invalid }
         var result: VisualGramGiftPurchaseResult = .invalid
-        self.update(accountId: accountId) { buyer in
-            guard buyer.enabled, let balance = buyer.stars else { return }
+        self.updateValues { values in
+            let buyerKey = String(accountId.toInt64())
+            let recipientKey = String(recipientPeerId.toInt64())
+            guard var buyer = values[buyerKey], buyer.enabled, let balance = buyer.stars else { return }
             guard balance >= price else { result = .insufficientBalance; return }
             let gift = VisualGramPremiumGift(id: UUID().uuidString, recipientId: recipientPeerId.toInt64(), date: now, months: months, stars: price, text: text, entities: entities)
             buyer.stars = balance - price
             Self.recordStarsTransaction(value: &buyer, amount: -price, kind: .purchase, peerId: recipientPeerId, gift: nil, title: "Telegram Premium", now: now)
             buyer.premiumGifts = (buyer.premiumGifts ?? []) + [gift]
+            values[buyerKey] = buyer
+
+            var recipient = values[recipientKey] ?? VisualGramAppearance()
+            recipient.enabled = true
+            recipient.premium = true
+            values[recipientKey] = recipient
             result = .success
         }
         return result

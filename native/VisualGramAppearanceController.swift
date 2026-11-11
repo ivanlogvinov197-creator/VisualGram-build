@@ -4,6 +4,7 @@ import Display
 import SwiftSignalKit
 import TelegramCore
 import TelegramPresentationData
+import PresentationDataUtils
 import ItemListUI
 import AccountContext
 import GiftOptionsScreen
@@ -18,7 +19,7 @@ import BusinessHoursSetupScreen
 import BusinessLocationSetupScreen
 
 private struct VisualGramAppearanceEntry: ItemListNodeEntry {
-    enum Kind: Equatable { case toggle(Bool), button(String), info }
+    enum Kind: Equatable { case toggle(Bool), button(String), destructive, info }
     let stableId: Int32
     let section: ItemListSectionId
     let title: String
@@ -41,6 +42,8 @@ private struct VisualGramAppearanceEntry: ItemListNodeEntry {
             return ItemListSwitchItem(presentationData: presentationData, title: self.title, value: value, sectionId: self.section, style: .blocks, updated: { actions.toggle(self.stableId, value: $0) })
         case let .button(label):
             return ItemListDisclosureItem(presentationData: presentationData, title: self.title, label: label, sectionId: self.section, style: .blocks, action: { actions.open(self.stableId) })
+        case .destructive:
+            return ItemListActionItem(presentationData: presentationData, title: self.title, kind: .destructive, alignment: .natural, sectionId: self.section, style: .blocks, action: { actions.open(self.stableId) })
         case .info:
             return ItemListTextItem(presentationData: presentationData, text: .plain(self.title), sectionId: self.section)
         }
@@ -241,13 +244,21 @@ private final class VisualGramAppearanceActions {
                 }
             }
         case 40:
-            let alert = UIAlertController(title: "Сбросить оформление?", message: "Локальные подарки, юзернеймы, номер, рейтинг, значки и статусы выбранного профиля будут удалены.", preferredStyle: .alert)
-            alert.addAction(UIAlertAction(title: "Отмена", style: .cancel))
-            alert.addAction(UIAlertAction(title: "Сбросить", style: .destructive, handler: { [weak self] _ in
-                guard let self else { return }
-                VisualGramLocalAppearance.shared.reset(accountId: self.context.account.peerId, targetPeerId: self.targetPeerId)
-            }))
-            self.presentNative(alert)
+            let accountId = self.context.account.peerId
+            let targetPeerId = self.targetPeerId
+            let alert = textAlertController(
+                context: self.context,
+                title: "Очистить всё оформление?",
+                text: "Профиль «\(self.targetTitle)». Будут удалены локальные настройки, подарки, балансы и история. Отложенные подарки этого профиля будут отменены.",
+                actions: [
+                    TextAlertAction(type: .genericAction, title: "Отмена", action: {}),
+                    TextAlertAction(type: .destructiveAction, title: "Очистить", action: {
+                        VisualGramLocalAppearance.shared.reset(accountId: accountId, targetPeerId: targetPeerId)
+                    })
+                ],
+                dismissOnOutsideTap: false
+            )
+            self.controller?.present(alert, in: .window(.root))
         case 1000..<2000: self.editUsername(index: Int(id - 1000))
         case 2000..<3000: self.openGift(index: Int(id - 2000))
         case 3000..<4000: self.openScheduledGift(index: Int(id - 3000))
@@ -730,6 +741,7 @@ func visualGramAppearanceController(context: AccountContext) -> ViewController {
         add(7, -1, "Выбор профиля", .button(actions.targetTitle))
         if activeSection == -1 {
             add(900, 0, "Профиль", .button("")); add(901, 0, "Подарки", .button("")); add(902, 0, "Балансы", .button(""))
+            add(40, 1, "Очистить всё оформление", .destructive)
         } else {
             add(903, -1, "Назад", .button(""))
             switch activeSection {
