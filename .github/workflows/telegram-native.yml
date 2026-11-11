@@ -96,7 +96,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/verify-ipa"
           unzip -q "$RUNNER_TEMP/native-artifacts/Telegram.ipa" -d "$RUNNER_TEMP/verify-ipa"
           codesign --verify --deep --strict "$RUNNER_TEMP/verify-ipa/Payload/Telegram.app"
-          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleDisplayName' "$RUNNER_TEMP/verify-ipa/Payload/Telegram.app/Info.plist")" = "DuckGram"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleDisplayName' "$RUNNER_TEMP/verify-ipa/Payload/Telegram.app/Info.plist")" = "Telegram"
 
       - name: Encrypt signed IPA for private download
         if: inputs.validation_only != true
