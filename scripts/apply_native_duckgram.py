@@ -48,7 +48,55 @@ def apply_duckgram(root):
     replace(settings, 'abs(starsState.balance.value) > 0', 'starsState.balance.value != 0', expected=2)
     replace(settings, 'abs(tonState.balance.value) > 0', 'tonState.balance.value != 0', expected=2)
 
+    sessions = sub / 'SettingsUI/Sources/Privacy and Security'
+    session_item = sessions / 'Recent Sessions/ItemListRecentSessionItem.swift'
+    replace(session_item, '    let platform = session.platform.lowercased()\n',
+            '    let platform = session.isCurrent ? "ios" : session.platform.lowercased()\n')
+    replace(session_item, '            let appString = "\\(item.session.appName) \\(appVersion)"\n',
+            '''            let appName = item.session.isCurrent ? "Telegram iOS" : item.session.appName
+            let appString = "\\(appName) \\(appVersion)"
+''')
+    session_screen = sessions / 'RecentSessionScreen.swift'
+    replace(session_screen, '                applicationString =  "\\(session.appName) \\(appVersion)"\n',
+            '''                let appName = session.isCurrent ? "Telegram iOS" : session.appName
+                applicationString = "\\(appName) \\(appVersion)"
+''')
+
     root_controller = ui / 'Sources/TelegramRootController.swift'
+    replace(root_controller, '        controllers.append(contactsController)\n', '')
+    replace(root_controller, '        controllers.append(self.contactsController!)\n', '')
+    replace(root_controller, '        // A removed selected tab would otherwise fall back to index 0 (Contacts): select Chats instead.', '        // Select Chats if the currently selected tab disappears.')
+    replace(root_controller, '        let contactsController = ContactsController(context: self.context)\n',
+            '''        let contactsController = ContactsController(context: self.context)
+        contactsController.standaloneBackPressed = { [weak self] in
+            self?.popToRoot(animated: true)
+        }
+''')
+    replace(root_controller, '''    public func openContacts() {
+        guard let rootTabController = self.rootTabController else {
+            return
+        }
+        
+        self.popToRoot(animated: false)
+    
+        if let index = rootTabController.controllers.firstIndex(where: { $0 is ContactsController }) {
+            rootTabController.selectedIndex = index
+        }
+    }
+''', '''    public func openContacts() {
+        guard let contactsController = self.contactsController else {
+            return
+        }
+        self.popToRoot(animated: false)
+        self.pushViewController(contactsController)
+    }
+''')
+    contacts = sub / 'ContactListUI/Sources/ContactsController.swift'
+    replace(contacts, '    public var switchToChatsController: (() -> Void)?\n',
+            '    public var switchToChatsController: (() -> Void)?\n    public var standaloneBackPressed: (() -> Void)?\n')
+    contacts_node = sub / 'ContactListUI/Sources/ContactsControllerNode.swift'
+    replace(contacts_node, '            backPressed: nil\n',
+            '            backPressed: self.controller?.standaloneBackPressed\n')
     replace(root_controller, 'import TelegramPresentationData\n', 'import TelegramPresentationData\nimport PresentationDataUtils\n')
     replace(root_controller, '    override public func containerLayoutUpdated(', '''    override public func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)

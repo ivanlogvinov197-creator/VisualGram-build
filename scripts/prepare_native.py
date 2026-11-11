@@ -16,14 +16,6 @@ def replace(path, old, new, expected=1):
 
 
 def prepare(root):
-    replace(root / "Telegram/BUILD",
-            '    <key>CFBundleDisplayName</key>\n    <string>Telegram</string>',
-            '    <key>CFBundleDisplayName</key>\n    <string>DuckGram</string>', expected=2)
-    for path in (root / "Telegram/Telegram-iOS").glob("*.lproj/InfoPlist.strings"):
-        text = path.read_text(encoding="utf-8")
-        updated = re.sub(r'(CFBundleDisplayName\s*=\s*)"[^"]*"', r'\1"DuckGram"', text)
-        if updated != text:
-            path.write_text(updated, encoding="utf-8", newline="\n")
     # A single ad-hoc profile cannot sign Telegram's separate extension targets.
     replace(root / "Telegram/BUILD",
             'name = "disableExtensions",\n    build_setting_default = False,',

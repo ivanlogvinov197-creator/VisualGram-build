@@ -61,9 +61,23 @@ store.scheduleGift(accountId: own, targetPeerId: own, gift: gift, deliveryDate: 
 assert(store.appearance(accountId: own).scheduledGifts?.count == 1, "reschedule duplicated pending gift")
 assert(store.deliverScheduledGifts(accountId: own, now: 200).isEmpty, "ignored reschedule")
 store.scheduleGift(accountId: own, targetPeerId: other, gift: gift, deliveryDate: 400)
+store.scheduleGift(accountId: secondAccount, targetPeerId: own, gift: gift, deliveryDate: 350)
+store.update(accountId: own) {
+    $0.premium = true
+    $0.stars = 123
+    $0.grams = 456
+    $0.usernames = [1]
+    $0.giftOperationHistory = [gift]
+    $0.gramCardPlacements = [:]
+}
+let otherBeforeReset = store.appearance(accountId: other)
+let otherSchedule = store.appearance(accountId: own).scheduledGifts?.filter { $0.targetPeerId == other.toInt64() }
 store.reset(accountId: own)
-assert(store.appearance(accountId: own).scheduledGifts?.count == 1, "reset removed another profile's queue")
-assert(store.appearance(accountId: own).gifts.isEmpty)
+var cleared = VisualGramAppearance()
+cleared.scheduledGifts = otherSchedule
+assert(store.appearance(accountId: own) == cleared, "reset left profile data or removed another profile's queue")
+assert(store.appearance(accountId: other) == otherBeforeReset, "reset changed another profile")
+assert(store.deliverScheduledGifts(accountId: secondAccount, now: 350).isEmpty, "reset left a gift queued from another account")
 let encoded = try JSONEncoder().encode(store.values)
 let restored = try JSONDecoder().decode([String: VisualGramAppearance].self, from: encoded)
 let reopened = VisualGramLocalAppearance()

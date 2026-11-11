@@ -59,18 +59,22 @@ public final class VisualGramLocalAppearance {
 PREMIUM_CHECKS = r'''
 let premiumStore = VisualGramLocalAppearance()
 premiumStore.values["10"] = .init(enabled: true, stars: 2500)
+premiumStore.values["20"] = .init(stars: 100)
 assert(premiumStore.buyLocalPremiumGift(accountId: a, recipientPeerId: b, months: 12, price: 2500, text: "Thanks", entities: [3], now: 500) == .success)
 let premiumBuyer = premiumStore.appearance(accountId: a)
+let premiumRecipient = premiumStore.appearance(accountId: a, targetPeerId: b)
+assert(premiumRecipient.enabled && premiumRecipient.premium && premiumRecipient.stars == 100)
+assert(premiumStore.appearance(accountId: b).premium && !premiumBuyer.premium)
 assert(premiumBuyer.stars == 0 && premiumBuyer.starsHistory?.last?.amount == -2500)
 assert(premiumBuyer.premiumGifts?.last?.recipientId == 20 && premiumBuyer.premiumGifts?.last?.months == 12)
 assert(premiumBuyer.premiumGifts?.last?.text == "Thanks" && premiumBuyer.premiumGifts?.last?.entities == [3])
-assert(premiumStore.buyLocalPremiumGift(accountId: a, recipientPeerId: b, months: 12, price: 2500, text: "", entities: [], now: 501) == .insufficientBalance)
+assert(premiumStore.buyLocalPremiumGift(accountId: a, recipientPeerId: c, months: 12, price: 2500, text: "", entities: [], now: 501) == .insufficientBalance)
 assert(premiumStore.appearance(accountId: a).premiumGifts?.count == 1)
 assert(premiumStore.appearance(accountId: a).starsHistory?.count == 1)
-assert(!premiumStore.appearance(accountId: b).premium)
-let premiumReload = try JSONDecoder().decode(VisualGramAppearance.self, from: JSONEncoder().encode(premiumBuyer))
-assert(premiumReload.premiumGifts == premiumBuyer.premiumGifts)
-print("PASS: local Premium debit, insufficient funds, caption, history and persistence")
+assert(!premiumStore.appearance(accountId: c).premium)
+let premiumReload = try JSONDecoder().decode([String: VisualGramAppearance].self, from: JSONEncoder().encode(premiumStore.values))
+assert(premiumReload["10"]?.premiumGifts == premiumBuyer.premiumGifts && premiumReload["20"]?.premium == true)
+print("PASS: local Premium activation for recipient, debit, insufficient funds, caption, history and persistence")
 '''
 
 
