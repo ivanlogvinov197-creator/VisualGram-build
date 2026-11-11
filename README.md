@@ -7,8 +7,8 @@ Telegram 13.1.2 adds local gift crafting, a GRAM balance and transaction history
 NFT-decorated wallet cards, native profile/business editors, swipeable gift/username lists, second-precision scheduling and a wallet-card placement editor.
 Visual appearance requires a signed server lease: 24-hour device trial, then a lifetime activation code bound to one device key.
 They do not change server ownership, payments, verification or subscriptions.
-The display name is DuckGram. Tap Chats three times within one second between
-taps to open DuckGram. Appearance controls are hidden from Settings and profiles.
+The Home Screen label is Telegram. Tap Chats three times within one second
+between taps to open DuckGram. Appearance controls are hidden from Settings and profiles.
 Local Stars history records purchases, sales, balance adjustments and the
 25-Star NFT transfer fee; real payments and server transaction history are unchanged.
 
