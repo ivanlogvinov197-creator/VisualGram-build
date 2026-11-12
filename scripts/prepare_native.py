@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 import re
 
-UPSTREAM_REVISION = "279f89e4d4f63f17227bf877dc3d8990f22ecd58"
+UPSTREAM_REVISION = "24638bc69bd083981b178dd1e7f921eebbf7fc46"
 
 
 def replace(path, old, new, expected=1):

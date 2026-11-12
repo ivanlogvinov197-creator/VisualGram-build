@@ -37,7 +37,7 @@ def apply(root, project):
     start = source.index(signature)
     end = source.index('    ) {', start)
     parameters = re.findall(r'^        (\w+):', source[start:end], re.MULTILINE)
-    if len(parameters) != 48:
+    if len(parameters) != 50:
         raise ValueError("PeerInfoScreenData constructor changed")
     original = {"peer": "serverPeer", "cachedData": "serverCachedData", "availablePanes": "serverAvailablePanes"}
     arguments = ',\n'.join(f'            {name}: self.{original.get(name, name)}' for name in parameters)

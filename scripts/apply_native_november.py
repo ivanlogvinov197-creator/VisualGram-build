@@ -1,4 +1,4 @@
-"""Local-only extensions for the pinned Telegram 13.1.2 native screens."""
+"""Local-only extensions for the pinned Telegram 13.2 native screens."""
 import shutil
 from prepare_native import replace
 

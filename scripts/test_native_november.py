@@ -209,10 +209,12 @@ assert(VisualGramLocalAppearance.cardStickerAddress(first) != VisualGramLocalApp
 let money = VisualGramLocalAppearance()
 assert(money.localGramBalance(accountId: a) == nil)
 assert(money.topUpLocalGrams(accountId: a, amount: 1_000_000_001, now: 1))
-assert(money.transferLocalGrams(accountId: a, to: b, amount: 100_000_001, comment: "test", now: 2) == .sent)
+let transferId = UUID().uuidString
+assert(money.transferLocalGrams(accountId: a, to: b, amount: 100_000_001, comment: "test", now: 2, transferId: transferId) == .sent)
 assert(money.localGramBalance(accountId: a) == 900_000_000 && money.localGramBalance(accountId: b) == 100_000_001)
 let gramDebit = money.appearance(accountId: a).gramHistory!.last!
 let gramCredit = money.appearance(accountId: b).gramHistory!.last!
+assert(gramDebit.id == transferId && gramCredit.id == transferId)
 assert(gramDebit.id == gramCredit.id && gramDebit.amount == -gramCredit.amount && gramDebit.comment == "test")
 assert(gramDebit.peerId == b.toInt64() && gramCredit.peerId == a.toInt64() && gramDebit.kind == .transfer)
 assert(money.transferLocalGrams(accountId: a, to: a, amount: 1, comment: nil, now: 3) == .invalidRecipient)

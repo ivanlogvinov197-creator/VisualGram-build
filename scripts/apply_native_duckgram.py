@@ -42,22 +42,6 @@ def apply_duckgram(root):
 ''', '                levelFraction = progress(for: component.starRating)\n')
     replace(rating, '            levelFraction = max(0.0, levelFraction)\n', '')
 
-    tab_bar = components / 'TabBarComponent/Sources/TabBarComponent.swift'
-    replace(tab_bar, '            let itemsLayout = tabBarItemsLayout(', '''            if component.axis == .horizontal, !component.isCompact, unboundItemWidths.count == 2,
-               component.items.allSatisfy({ item in
-                   if case .tabBarItem = item.content { return true }
-                   return false
-               }) {
-                let widestItem = unboundItemWidths.max() ?? 0.0
-                let preferredWidth = max(196.0, 2.0 * (widestItem + innerInset))
-                availableLength = min(availableLength, preferredWidth)
-            }
-            let itemsLayout = tabBarItemsLayout(''')
-    replace(tab_bar, 'searchFrame = CGRect(origin: CGPoint(x: availableSize.width - searchSize.width, y: 0.0), size: searchSize)',
-            'searchFrame = CGRect(origin: CGPoint(x: size.width - searchSize.width, y: 0.0), size: searchSize)')
-    replace(peer / 'PeerInfoScreen.swift', '                if let primary = primaryAndOther.0, !primaryAndOther.1.isEmpty {\n',
-            '                if let primary = primaryAndOther.0 {\n')
-
     settings = peer / 'PeerInfoSettingsItems.swift'
     replace(settings, '    if let tonState = data.tonState {\n', '''    let duckGramWallet = VisualGramLocalAppearance.shared.appearance(accountId: context.account.peerId)
     if duckGramWallet.enabled, let grams = duckGramWallet.grams {
@@ -84,7 +68,7 @@ def apply_duckgram(root):
                                     component.withdraw()
 ''', '''                                if showLocalGrams {
                                     if let controller = environment.controller() {
-                                        let alert = textAlertController(context: component.context, title: "Баланс GRAM", text: "Визуальный баланс доступен только в DuckGram.", actions: [TextAlertAction(type: .defaultAction, title: environment.strings.Common_OK, action: {})])
+                                        let alert = textAlertController(context: component.context, title: environment.strings.Wallet_Transfer_ErrorTitle, text: environment.strings.Wallet_Transfer_ErrorText, actions: [TextAlertAction(type: .defaultAction, title: environment.strings.Common_OK, action: {})])
                                         controller.present(alert, in: .window(.root))
                                     }
                                     return
@@ -114,40 +98,6 @@ def apply_duckgram(root):
 ''')
 
     root_controller = ui / 'Sources/TelegramRootController.swift'
-    replace(root_controller, '        controllers.append(contactsController)\n', '')
-    replace(root_controller, '        controllers.append(self.contactsController!)\n', '')
-    replace(root_controller, '        // A removed selected tab would otherwise fall back to index 0 (Contacts): select Chats instead.', '        // Select Chats if the currently selected tab disappears.')
-    replace(root_controller, '        let contactsController = ContactsController(context: self.context)\n',
-            '''        let contactsController = ContactsController(context: self.context)
-        contactsController.standaloneBackPressed = { [weak self] in
-            self?.popToRoot(animated: true)
-        }
-''')
-    replace(root_controller, '''    public func openContacts() {
-        guard let rootTabController = self.rootTabController else {
-            return
-        }
-        
-        self.popToRoot(animated: false)
-    
-        if let index = rootTabController.controllers.firstIndex(where: { $0 is ContactsController }) {
-            rootTabController.selectedIndex = index
-        }
-    }
-''', '''    public func openContacts() {
-        guard let contactsController = self.contactsController else {
-            return
-        }
-        self.popToRoot(animated: false)
-        self.pushViewController(contactsController)
-    }
-''')
-    contacts = sub / 'ContactListUI/Sources/ContactsController.swift'
-    replace(contacts, '    public var switchToChatsController: (() -> Void)?\n',
-            '    public var switchToChatsController: (() -> Void)?\n    public var standaloneBackPressed: (() -> Void)?\n')
-    contacts_node = sub / 'ContactListUI/Sources/ContactsControllerNode.swift'
-    replace(contacts_node, '            backPressed: nil\n',
-            '            backPressed: self.controller?.standaloneBackPressed\n')
     replace(root_controller, 'import TelegramPresentationData\n', 'import TelegramPresentationData\nimport PresentationDataUtils\n')
     replace(root_controller, '    override public func containerLayoutUpdated(', '''    override public func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
