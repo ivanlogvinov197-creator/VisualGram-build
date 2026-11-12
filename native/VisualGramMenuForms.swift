@@ -9,7 +9,8 @@ import TelegramPresentationData
 final class VisualGramDetailsController: ViewController, UIPickerViewDataSource, UIPickerViewDelegate {
     private let context: AccountContext
     private let fields: [(String, String)]
-    private let initialDate: Int32
+    private let initialDate: Int32?
+    private let showFieldLabels: Bool
     private let seconds: Bool
     private let tonIndex: Int?
     private let phoneMode: Bool
@@ -21,8 +22,9 @@ final class VisualGramDetailsController: ViewController, UIPickerViewDataSource,
     private let secondPicker = UIPickerView()
     private let price = UILabel()
 
-    init(context: AccountContext, title: String, fields: [(String, String)], date: Int32, seconds: Bool = false, tonIndex: Int? = nil, phoneMode: Bool = false, save: @escaping ([String], Int32) -> Bool) {
+    init(context: AccountContext, title: String, fields: [(String, String)], date: Int32?, seconds: Bool = false, tonIndex: Int? = nil, phoneMode: Bool = false, showFieldLabels: Bool = false, save: @escaping ([String], Int32) -> Bool) {
         self.context = context; self.fields = fields; self.initialDate = date; self.seconds = seconds; self.tonIndex = tonIndex; self.phoneMode = phoneMode; self.saveValues = save
+        self.showFieldLabels = showFieldLabels
         super.init(navigationBarPresentationData: NavigationBarPresentationData(presentationData: context.sharedContext.currentPresentationData.with { $0 }))
         self.title = title
         self.navigationItem.rightBarButtonItem = UIBarButtonItem(title: "Сохранить", style: .done, target: self, action: #selector(self.save))
@@ -31,11 +33,31 @@ final class VisualGramDetailsController: ViewController, UIPickerViewDataSource,
     override func loadDisplayNode() {
         self.displayNode = ASDisplayNode(); self.displayNodeDidLoad()
         let theme = self.context.sharedContext.currentPresentationData.with { $0 }.theme
+        let interfaceStyle: UIUserInterfaceStyle = theme.overallDarkAppearance ? .dark : .light
+        self.view.overrideUserInterfaceStyle = interfaceStyle
         self.displayNode.backgroundColor = theme.list.blocksBackgroundColor
         self.scroll.keyboardDismissMode = .interactive; self.view.addSubview(self.scroll)
         self.stack.axis = .vertical; self.stack.spacing = 12; self.scroll.addSubview(self.stack)
         for (index, field) in self.fields.enumerated() {
-            let input = UITextField(); input.placeholder = field.0; input.text = field.1
+            let input = UITextField()
+            input.text = field.1
+            input.keyboardAppearance = theme.overallDarkAppearance ? .dark : .light
+            if self.showFieldLabels {
+                let label = UILabel()
+                label.text = field.0
+                label.textColor = theme.list.itemSecondaryTextColor
+                label.font = .systemFont(ofSize: 15)
+                label.numberOfLines = 0
+                self.stack.addArrangedSubview(label)
+                self.stack.setCustomSpacing(4, after: label)
+                input.accessibilityLabel = field.0
+                input.keyboardType = .numbersAndPunctuation
+            } else {
+                input.attributedPlaceholder = NSAttributedString(
+                    string: field.0,
+                    attributes: [.foregroundColor: theme.list.itemPrimaryTextColor.withAlphaComponent(0.62)]
+                )
+            }
             input.borderStyle = .roundedRect; input.autocorrectionType = .no; input.autocapitalizationType = .none
             input.textColor = theme.list.itemPrimaryTextColor; input.backgroundColor = theme.list.itemBlocksBackgroundColor
             input.font = .systemFont(ofSize: 17); let inputHeight = input.heightAnchor.constraint(equalToConstant: 48); inputHeight.priority = .defaultHigh; inputHeight.isActive = true
@@ -45,14 +67,18 @@ final class VisualGramDetailsController: ViewController, UIPickerViewDataSource,
         }
         self.price.font = .systemFont(ofSize: 15); self.price.textColor = theme.list.itemSecondaryTextColor; self.price.numberOfLines = 0
         self.stack.addArrangedSubview(self.price)
+        self.datePicker.overrideUserInterfaceStyle = interfaceStyle
         self.datePicker.preferredDatePickerStyle = .wheels
         self.datePicker.datePickerMode = self.seconds ? .dateAndTime : .date
-        self.datePicker.date = Date(timeIntervalSince1970: TimeInterval(self.initialDate))
+        if let initialDate = self.initialDate {
+            self.datePicker.date = Date(timeIntervalSince1970: TimeInterval(initialDate))
+        }
         let dateHeight = self.datePicker.heightAnchor.constraint(equalToConstant: 216); dateHeight.priority = .defaultHigh; dateHeight.isActive = true
         self.stack.addArrangedSubview(self.datePicker)
         if self.seconds {
             let label = UILabel(); label.text = "Секунды"; label.textColor = theme.list.itemSecondaryTextColor
             self.stack.addArrangedSubview(label)
+            self.secondPicker.overrideUserInterfaceStyle = interfaceStyle
             self.secondPicker.dataSource = self; self.secondPicker.delegate = self
             self.secondPicker.heightAnchor.constraint(equalToConstant: 110).isActive = true
             self.stack.addArrangedSubview(self.secondPicker)
@@ -72,7 +98,7 @@ final class VisualGramDetailsController: ViewController, UIPickerViewDataSource,
     }
     @objc private func changed() {
         let collectible = !self.phoneMode || (self.inputs.first?.text ?? "").filter { $0.isNumber }.hasPrefix("888")
-        self.datePicker.isHidden = !collectible
+        self.datePicker.isHidden = self.initialDate == nil || !collectible
         if let index = self.tonIndex, self.inputs.indices.contains(index) {
             self.inputs[index].isHidden = !collectible; self.price.isHidden = !collectible
             let rate = self.context.currentAppConfiguration.with { $0 }.data?["ton_usd_rate"] as? Double
@@ -88,6 +114,11 @@ final class VisualGramDetailsController: ViewController, UIPickerViewDataSource,
     func pickerView(_ pickerView: UIPickerView, titleForRow row: Int, forComponent component: Int) -> String? { String(format: "%02d", row) }
     @objc private func save() {
         self.view.endEditing(true)
+        let values = self.inputs.map { $0.text ?? "" }
+        guard self.initialDate != nil else {
+            if self.saveValues(values, 0) { self.dismiss() }
+            return
+        }
         let date: Date
         if self.seconds {
             var components = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: self.datePicker.date)
@@ -95,7 +126,7 @@ final class VisualGramDetailsController: ViewController, UIPickerViewDataSource,
             guard let value = Calendar.current.date(from: components) else { return }; date = value
         } else { date = self.datePicker.date }
         guard date.timeIntervalSince1970 >= 0, date.timeIntervalSince1970 <= Double(Int32.max) else { return }
-        if self.saveValues(self.inputs.map { $0.text ?? "" }, Int32(date.timeIntervalSince1970)) { self.dismiss() }
+        if self.saveValues(values, Int32(date.timeIntervalSince1970)) { self.dismiss() }
     }
 }
 

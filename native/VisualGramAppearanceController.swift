@@ -73,6 +73,11 @@ private final class VisualGramAppearanceActions {
     }
 
     private func presentNative(_ alert: UIAlertController) {
+        let theme = self.context.sharedContext.currentPresentationData.with { $0 }.theme
+        alert.overrideUserInterfaceStyle = theme.overallDarkAppearance ? .dark : .light
+        for field in alert.textFields ?? [] {
+            field.keyboardAppearance = theme.overallDarkAppearance ? .dark : .light
+        }
         var presenter: UIViewController? = self.controller?.navigationController?.view.window?.rootViewController ?? self.controller
         while let presented = presenter?.presentedViewController { presenter = presented }
         presenter?.present(alert, animated: true)
@@ -341,15 +346,69 @@ private final class VisualGramAppearanceActions {
     }
 
     private func editRating() {
-        let rating = self.appearance.starRating
-        self.form(title: "Уровень Telegram", fields: [("Уровень (пусто — настоящий рейтинг)", rating.map { String($0.level) } ?? ""), ("Звёзды на начало уровня", rating.map { String($0.currentLevelStars) } ?? "0"), ("Текущие звёзды рейтинга", rating.map { String($0.stars) } ?? "0"), ("Звёзды следующего уровня (необязательно)", rating?.nextLevelStars.map(String.init) ?? "1000")]) { [weak self] values in
-            guard let self, values.count == 4 else { return }
-            if values[0].isEmpty { self.update { $0.starRating = nil }; return }
-            guard let level = Int32(values[0]), (-1...1_000_000).contains(level), let current = Int64(values[1]), let stars = Int64(values[2]) else { self.message("Проверь уровень и числа звёзд."); return }
-            let next = values[3].isEmpty ? nil : Int64(values[3])
-            guard values[3].isEmpty || next != nil, current != Int64.min, stars != Int64.min, current <= stars, (level < 0 ? stars < 0 && (next.map { $0 <= 0 } ?? true) : current >= 0), next.map({ $0 > stars && $0 > current }) ?? true else { self.message("Начало уровня должно быть не выше текущих звёзд, а следующий порог — выше них. Для отрицательного рейтинга укажи уровень -1, отрицательные звёзды и следующий порог не выше 0."); return }
-            self.update { $0.enabled = true; $0.starRating = TelegramStarRating(level: level, currentLevelStars: current, stars: stars, nextLevelStars: next) }
-        }
+        let appearance = self.appearance
+        let now = Int64(Date().timeIntervalSince1970)
+        let savedPending = appearance.pendingStarRating
+        let pending = savedPending.flatMap { Int64($0.timestamp) > now ? $0 : nil }
+        let rating = pending == nil ? savedPending?.rating ?? appearance.starRating : appearance.starRating
+        let fields: [(String, String)] = [
+            ("Уровень в профиле. Пустое поле вернёт настоящий рейтинг.", rating.map { String($0.level) } ?? ""),
+            ("Баллы на начало уровня. Отсюда заполняется полоска. Пусто — от нуля.", rating.map { String($0.currentLevelStars) } ?? ""),
+            ("Текущие баллы. Число слева от дроби.", rating.map { String($0.stars) } ?? ""),
+            ("Порог следующего уровня. Число справа от дроби. Пусто — без порога.", rating?.nextLevelStars.map(String.init) ?? ""),
+            ("Через сколько дней обновится рейтинг. 0 — сегодня, пусто — без обновления.", pending.map {
+                let remaining = Int64($0.timestamp) - now
+                return String(remaining < 86400 ? 0 : (remaining + 86399) / 86400)
+            } ?? ""),
+            ("Сколько баллов добавится при обновлении.", pending.flatMap { future in rating.map { String(future.rating.stars - $0.stars) } } ?? "")
+        ]
+        let target = self.targetPeerId
+        self.controller?.push(VisualGramDetailsController(context: self.context, title: "Рейтинг Telegram", fields: fields, date: nil, showFieldLabels: true, save: { [weak self] inputs, _ in
+            guard let self, inputs.count == 6 else { return false }
+            let values = inputs.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            if values[0].isEmpty {
+                VisualGramLocalAppearance.shared.update(accountId: self.context.account.peerId, targetPeerId: target) {
+                    $0.starRating = nil
+                    $0.pendingStarRating = nil
+                }
+                return true
+            }
+            let next = Int64(values[3])
+            guard let level = Int32(values[0]), (-1...1_000_000).contains(level),
+                  let stars = Int64(values[2]), stars != Int64.min,
+                  let start = values[1].isEmpty ? min(0, stars) : Int64(values[1]),
+                  start <= stars, values[3].isEmpty || next != nil,
+                  (level < 0 ? stars < 0 && (next.map { $0 <= 0 } ?? true) : start >= 0),
+                  next.map({ $0 > stars }) ?? true else {
+                self.message("Начало уровня должно быть не выше текущих баллов, а следующий порог — выше них. Для отрицательного рейтинга укажи уровень −1 и отрицательные баллы.")
+                return false
+            }
+            var pendingRating: TelegramStarPendingRating?
+            if !values[4].isEmpty || !values[5].isEmpty {
+                guard let days = Int64(values[4]), (0...365).contains(days),
+                      let points = Int32(values[5]), points > 0 else {
+                    self.message("Для обновления укажи срок от 0 до 365 дней и положительное число баллов.")
+                    return false
+                }
+                let (futureStars, overflow) = stars.addingReportingOverflow(Int64(points))
+                let timestamp = Int64(Date().timeIntervalSince1970) + (days == 0 ? 3600 : days * 86400)
+                guard !overflow, let updateTime = Int32(exactly: timestamp) else {
+                    self.message("Проверь баллы и срок обновления.")
+                    return false
+                }
+                let reachedNextLevel = next.map { futureStars >= $0 } ?? false
+                let future = TelegramStarRating(level: reachedNextLevel ? level + 1 : level,
+                    currentLevelStars: reachedNextLevel ? (next ?? start) : start,
+                    stars: futureStars, nextLevelStars: reachedNextLevel ? nil : next)
+                pendingRating = TelegramStarPendingRating(rating: future, timestamp: updateTime)
+            }
+            VisualGramLocalAppearance.shared.update(accountId: self.context.account.peerId, targetPeerId: target) {
+                $0.enabled = true
+                $0.starRating = TelegramStarRating(level: level, currentLevelStars: start, stars: stars, nextLevelStars: next)
+                $0.pendingStarRating = pendingRating
+            }
+            return true
+        }))
     }
 
     private func configureVerification(forceSetup: Bool = false) {

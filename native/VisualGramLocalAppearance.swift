@@ -56,8 +56,9 @@ public struct VisualGramGift: Codable, Equatable {
         public var title: String?
         public var peerId: Int64?
         public var gift: StarGift?
+        public var comment: String?
 
-        public init(id: String, date: Int32, amount: Int64, kind: Kind, title: String?, peerId: Int64?, gift: StarGift?) {
+        public init(id: String, date: Int32, amount: Int64, kind: Kind, title: String?, peerId: Int64?, gift: StarGift?, comment: String? = nil) {
             self.id = id
             self.date = date
             self.amount = amount
@@ -65,6 +66,7 @@ public struct VisualGramGift: Codable, Equatable {
             self.title = title
             self.peerId = peerId
             self.gift = gift
+            self.comment = comment
         }
     }
     public enum OperationKind: String, Codable {
@@ -215,6 +217,8 @@ public struct VisualGramAppearance: Codable, Equatable {
     public var majorTemplate: PeerVerification?
     public var phoneNumber: VisualGramUsername?
     public var starRating: TelegramStarRating?
+    public var pendingStarRating: TelegramStarPendingRating?
+    public var hiddenChatGifts: [String: Set<String>]?
 
     public init() {
     }
@@ -360,9 +364,9 @@ public final class VisualGramLocalAppearance {
         }
     }
 
-    func updateValues(recordOperations: Bool = true, _ transform: (inout [String: VisualGramAppearance]) -> Void) {
+    func updateValues(recordOperations: Bool = true, allowWhileLocked: Bool = false, _ transform: (inout [String: VisualGramAppearance]) -> Void) {
         self.lock.lock()
-        guard VisualGramActivation.shared.hasAccess else { self.lock.unlock(); return }
+        guard allowWhileLocked || VisualGramActivation.shared.hasAccess else { self.lock.unlock(); return }
         let previous = self.values
         transform(&self.values)
         if recordOperations { Self.recordGiftOperations(previous: previous, values: &self.values) }
@@ -384,13 +388,77 @@ public final class VisualGramLocalAppearance {
                 values[key]?.scheduledGifts?.removeAll { $0.targetPeerId == target }
             }
             let remaining = values[targetKey]?.scheduledGifts ?? []
-            if remaining.isEmpty {
+            let hiddenChatGifts = values[targetKey]?.hiddenChatGifts
+            if remaining.isEmpty && hiddenChatGifts == nil {
                 values.removeValue(forKey: targetKey)
             } else {
                 var cleared = VisualGramAppearance()
-                cleared.scheduledGifts = remaining
+                cleared.scheduledGifts = remaining.isEmpty ? nil : remaining
+                cleared.hiddenChatGifts = hiddenChatGifts
                 values[targetKey] = cleared
             }
+        }
+    }
+
+    public static func chatGiftHash(_ identifier: String) -> UInt32 {
+        identifier.utf8.reduce(UInt32(2166136261)) { ($0 ^ UInt32($1)) &* 16777619 }
+    }
+
+    public static func chatGiftVisibilityKey(_ gift: VisualGramGift, sender: Int64) -> String {
+        if case .unique = gift.gift {
+            // Some transfers store separate identifiers for the two copies of one message.
+            return "\(sender):\(gift.date):\(gift.assetIdentifier)"
+        }
+        return gift.localIdentifier ?? "\(sender):\(gift.date):\(gift.assetIdentifier)"
+    }
+
+    public func hiddenChatGiftKeys(accountId: EnginePeer.Id, peerId: EnginePeer.Id) -> Set<String> {
+        self.appearance(accountId: accountId).hiddenChatGifts?[String(peerId.toInt64())] ?? []
+    }
+
+    public func hideChatGifts(accountId: EnginePeer.Id, peerId: EnginePeer.Id, messageId: Int32? = nil, forEveryone: Bool) {
+        guard peerId.namespace == Namespaces.Peer.CloudUser else { return }
+        let account = accountId.toInt64()
+        let peer = peerId.toInt64()
+        self.updateValues(recordOperations: false, allowWhileLocked: true) { values in
+            var keys = Set<String>()
+            func include(_ identifier: String, key: String) {
+                if messageId == nil || messageId == -Int32(Self.chatGiftHash(identifier) & 0x3fffffff) - 1 {
+                    keys.insert(key)
+                }
+            }
+            func collect(from owner: Int64, other: Int64, reversed: Bool) {
+                guard let appearance = values[String(owner)] else { return }
+                for gift in appearance.gifts where gift.counterpartyId == other {
+                    let sender = gift.direction == .sent ? owner : other
+                    var displayGift = gift
+                    if reversed {
+                        displayGift.direction = gift.direction == .sent ? .received : .sent
+                        displayGift.counterpartyId = owner
+                    }
+                    include(displayGift.identifier, key: Self.chatGiftVisibilityKey(gift, sender: sender))
+                }
+                for gift in appearance.premiumGifts ?? [] where gift.recipientId == other {
+                    include(gift.id, key: gift.id)
+                }
+                for transfer in appearance.gramHistory ?? [] where transfer.kind == .transfer && transfer.peerId == other {
+                    include(transfer.id, key: transfer.id)
+                }
+            }
+            collect(from: account, other: peer, reversed: false)
+            if peer != account { collect(from: peer, other: account, reversed: true) }
+            guard !keys.isEmpty else { return }
+
+            func hide(for viewer: Int64, other: Int64) {
+                let key = String(viewer)
+                var appearance = values[key] ?? VisualGramAppearance()
+                var hidden = appearance.hiddenChatGifts ?? [:]
+                hidden[String(other), default: []].formUnion(keys)
+                appearance.hiddenChatGifts = hidden
+                values[key] = appearance
+            }
+            hide(for: account, other: peer)
+            if forEveryone && peer != account { hide(for: peer, other: account) }
         }
     }
 

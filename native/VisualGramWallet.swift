@@ -1,5 +1,9 @@
 import Foundation
 
+public enum VisualGramGramTransferResult: Equatable {
+    case sent, insufficientBalance, invalidRecipient, overflow, unavailable
+}
+
 public extension VisualGramLocalAppearance {
     static let gramScale: Int64 = 1_000_000_000
 
@@ -14,6 +18,61 @@ public extension VisualGramLocalAppearance {
 
     static func formatGrams(_ nano: Int64) -> String {
         NSDecimalNumber(decimal: Decimal(nano) / Decimal(gramScale)).stringValue
+    }
+
+    func localGramBalance(accountId: EnginePeer.Id) -> Int64? {
+        let value = self.appearance(accountId: accountId)
+        return value.enabled ? value.grams : nil
+    }
+
+    func transferLocalGrams(accountId: EnginePeer.Id, to recipient: EnginePeer.Id, amount: Int64, comment: String?, now: Int32) -> VisualGramGramTransferResult {
+        guard recipient != accountId, recipient.namespace == Namespaces.Peer.CloudUser else { return .invalidRecipient }
+        guard amount > 0 else { return .unavailable }
+        let id = UUID().uuidString
+        let senderKey = String(accountId.toInt64())
+        let recipientKey = String(recipient.toInt64())
+        var result: VisualGramGramTransferResult = .unavailable
+        self.updateValues(recordOperations: false) { values in
+            guard var sender = values[senderKey], sender.enabled, let balance = sender.grams, amount <= balance else {
+                result = .insufficientBalance
+                return
+            }
+            var receiver = values[recipientKey] ?? VisualGramAppearance()
+            let (credit, overflow) = (receiver.grams ?? 0).addingReportingOverflow(amount)
+            guard !overflow else { result = .overflow; return }
+            sender.grams = balance - amount
+            receiver.grams = credit
+            receiver.enabled = true
+            var outgoing = sender.gramHistory ?? []
+            var incoming = receiver.gramHistory ?? []
+            outgoing.append(.init(id: id, date: now, amount: -amount, kind: .transfer, title: "Исходящий перевод", peerId: recipient.toInt64(), gift: nil, comment: comment))
+            incoming.append(.init(id: id, date: now, amount: amount, kind: .transfer, title: "Входящий перевод", peerId: accountId.toInt64(), gift: nil, comment: comment))
+            sender.gramHistory = outgoing
+            receiver.gramHistory = incoming
+            values[senderKey] = sender
+            values[recipientKey] = receiver
+            result = .sent
+        }
+        return result
+    }
+
+    func topUpLocalGrams(accountId: EnginePeer.Id, amount: Int64, now: Int32) -> Bool {
+        guard amount > 0 else { return false }
+        var applied = false
+        self.updateValues(recordOperations: false) { values in
+            let key = String(accountId.toInt64())
+            var value = values[key] ?? VisualGramAppearance()
+            let (balance, overflow) = (value.grams ?? 0).addingReportingOverflow(amount)
+            guard !overflow else { return }
+            var history = value.gramHistory ?? []
+            history.append(.init(id: UUID().uuidString, date: now, amount: amount, kind: .topUp, title: "Пополнение", peerId: nil, gift: nil))
+            value.gramHistory = history
+            value.grams = balance
+            value.enabled = true
+            values[key] = value
+            applied = true
+        }
+        return applied
     }
 
     static func cardStickerAddress(_ gift: VisualGramGift) -> String { "visualgram:" + gift.identifier }
