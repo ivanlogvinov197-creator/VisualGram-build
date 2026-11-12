@@ -3,10 +3,6 @@ from prepare_native import replace
 
 
 def apply_revision(root):
-    history = root / 'submodules/TelegramUI/Sources/ChatHistoryEntriesForView.swift'
-    replace(history, 'peer: chatPeer, view: view, presentationData: presentationData)',
-            'peer: chatPeer, accountPeer: associatedData.accountPeer, view: view, presentationData: presentationData)')
-
     # The account peer is available even in an empty history. The native service
     # formatter must see it as the author, not infer the sender from the chat peer.
     bubble = root / 'submodules/TelegramUI/Components/Chat/ChatMessageGiftBubbleContentNode/Sources/ChatMessageGiftBubbleContentNode.swift'

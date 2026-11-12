@@ -31,6 +31,9 @@ public struct PeerVerification: Codable, Equatable {
 }
 public typealias PeerEmojiStatus = Int
 public typealias TelegramStarRating = Int
+public typealias TelegramStarPendingRating = Int
+enum Namespaces { enum Peer { static let CloudUser: Int32 = 0 } }
+extension EnginePeer.Id { var namespace: Int32 { 0 } }
 public typealias VisualGramNameColor = Int
 public typealias TelegramBusinessHours = Int
 public typealias TelegramBusinessLocation = Int
@@ -41,7 +44,7 @@ STORE = r'''
 public final class VisualGramLocalAppearance {
     private let lock = NSLock()
     var values: [String: VisualGramAppearance] = [:]
-    func updateValues(recordOperations: Bool = true, _ change: (inout [String: VisualGramAppearance]) -> Void) { change(&values) }
+    func updateValues(recordOperations: Bool = true, allowWhileLocked: Bool = false, _ change: (inout [String: VisualGramAppearance]) -> Void) { change(&values) }
 '''
 
 CHECKS = r'''
@@ -85,6 +88,23 @@ reopened.values = restored
 assert(reopened.deliverScheduledGifts(accountId: own, now: 500).count == 1, "pending queue lost on restart")
 assert(reopened.appearance(accountId: own, targetPeerId: other).gifts.first?.date == 400)
 assert(reopened.appearance(accountId: own).gifts.isEmpty, "wrong profile")
+let deletion = VisualGramLocalAppearance()
+let messageId = -Int32(VisualGramLocalAppearance.chatGiftHash(gift.identifier) & 0x3fffffff) - 1
+let giftKey = VisualGramLocalAppearance.chatGiftVisibilityKey(gift, sender: own.toInt64())
+deletion.addGift(accountId: own, targetPeerId: own, gift: gift)
+deletion.hideChatGifts(accountId: own, peerId: other, messageId: messageId, forEveryone: false)
+assert(deletion.hiddenChatGiftKeys(accountId: own, peerId: other) == [giftKey])
+assert(deletion.hiddenChatGiftKeys(accountId: other, peerId: own).isEmpty)
+assert(deletion.appearance(accountId: other).gifts.count == 1, "chat deletion removed the owned gift")
+let premium = VisualGramPremiumGift(id: "premium", recipientId: other.toInt64(), date: 500, months: 1, stars: 100, text: "", entities: [])
+deletion.update(accountId: own) { $0.premiumGifts = [premium] }
+deletion.hideChatGifts(accountId: own, peerId: other, forEveryone: true)
+assert(deletion.hiddenChatGiftKeys(accountId: other, peerId: own) == [giftKey, premium.id])
+assert(deletion.hiddenChatGiftKeys(accountId: secondAccount, peerId: own).isEmpty)
+deletion.addGift(accountId: own, targetPeerId: own, gift: VisualGramGift(gift: ordinary, counterpartyId: other.toInt64(), direction: .sent, date: 600, text: ""))
+assert(deletion.hiddenChatGiftKeys(accountId: own, peerId: other).count == 2, "chat deletion affected future gifts")
+let deletedReload = try JSONDecoder().decode([String: VisualGramAppearance].self, from: JSONEncoder().encode(deletion.values))
+assert(deletedReload["20"]?.hiddenChatGifts?["10"] == [giftKey, premium.id])
 reopened.scheduleGift(accountId: own, targetPeerId: own, gift: gift, deliveryDate: 600)
 reopened.update(accountId: own) { $0.scheduledGifts = [] }
 assert(reopened.deliverScheduledGifts(accountId: own, now: 600).isEmpty, "cancelled gift delivered")

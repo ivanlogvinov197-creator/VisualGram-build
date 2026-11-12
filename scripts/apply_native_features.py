@@ -17,13 +17,7 @@ def apply(root, project):
     shutil.copyfile(project / "native/VisualGramGiftManagement.swift", core / "VisualGramGiftManagement.swift")
     shutil.copyfile(project / "native/VisualGramGiftTrading.swift", core / "VisualGramGiftTrading.swift")
     shutil.copyfile(project / "native/VisualGramAppearanceController.swift", peer / "Sources/VisualGramAppearanceController.swift")
-    # Synthetic messages belong to the existing history renderer, which already
-    # owns the legacy Postbox boundary. Do not create a new Postbox consumer.
-    history_renderer = root / "submodules/TelegramUI/Sources/ChatHistoryEntriesForView.swift"
-    helper = (project / "native/VisualGramChatGifts.swift").read_text(encoding="utf-8")
-    helper = "\n".join(line for line in helper.splitlines() if not line.startswith("import "))
-    with history_renderer.open("a", encoding="utf-8", newline="\n") as output:
-        output.write("\n" + helper + "\n")
+    shutil.copyfile(project / "native/VisualGramChatGifts.swift", core / "VisualGramChatGifts.swift")
     shutil.copyfile(project / "native/VisualGramGiftDelivery.swift", root / "submodules/TelegramUI/Sources/VisualGramGiftDelivery.swift")
     account_context = root / "submodules/TelegramUI/Sources/AccountContext.swift"
     replace(account_context, '    private var experimentalUISettingsDisposable: Disposable?\n', '    private var experimentalUISettingsDisposable: Disposable?\n    private var visualGramGiftDelivery: VisualGramGiftDelivery?\n')
@@ -63,7 +57,12 @@ def apply(root, project):
                         data.cachedData = cached.withUpdatedVerification(verification)
                     }
                     if let rating = appearance.starRating, let cached = data.cachedData as? CachedUserData {
-                        data.cachedData = cached.withUpdatedStarRating(rating).withUpdatedPendingStarRating(nil)
+                        let now = Int32(clamping: Int64(Date().timeIntervalSince1970))
+                        if let pending = appearance.pendingStarRating, pending.timestamp <= now {
+                            data.cachedData = cached.withUpdatedStarRating(pending.rating).withUpdatedPendingStarRating(nil)
+                        } else {
+                            data.cachedData = cached.withUpdatedStarRating(rating).withUpdatedPendingStarRating(appearance.pendingStarRating)
+                        }
                     }
                     if appearance.gifts.contains(where: { $0.direction == .received }) && data.profileGiftsContext != nil && data.profileGiftsCollectionsContext != nil && !data.availablePanes.contains(.gifts) {
                         data.availablePanes.append(.gifts)
@@ -230,10 +229,20 @@ private func visualGramGiftHasPremium(context: AccountContext) -> Bool {
 ''')
 
     history = root / "submodules/TelegramUI/Sources/ChatHistoryEntriesForView.swift"
-    replace(history, '    if isMusicPlaylist && entries.count == 1 {\n', '''    if subject == nil, case let .peer(peerId) = location {
-        let localEntries = visualGramChatGiftEntries(context: context, peerId: peerId, peer: chatPeer, view: view, presentationData: presentationData)
-        if !localEntries.isEmpty {
-            entries.append(contentsOf: localEntries)
+    replace(history, '    if isMusicPlaylist && entries.count == 1 {\n', '''    if subject == nil, case let .peer(peerId) = location, let chatPeer, chatPeer.id == peerId {
+        let ownId = context.account.peerId
+        let accountPeer = associatedData.accountPeer ?? view.entries.lazy.compactMap { $0.message.peers[ownId] }.first.map(EnginePeer.init)
+        let messages = visualGramChatGiftMessages(
+            accountPeerId: ownId,
+            peer: EnginePeer(chatPeer),
+            accountPeer: accountPeer,
+            fromTimestamp: view.earlierId == nil ? nil : view.entries.first?.message.timestamp,
+            throughTimestamp: view.laterId == nil ? nil : view.entries.last?.message.timestamp
+        )
+        if !messages.isEmpty {
+            entries.append(contentsOf: messages.map {
+                .MessageEntry($0._asMessage(), presentationData, true, nil, .none, ChatMessageEntryAttributes())
+            })
             entries.sort()
         }
     }
@@ -248,7 +257,60 @@ private func visualGramGiftHasPremium(context: AccountContext) -> Bool {
 ''')
     context_menu = root / "submodules/TelegramUI/Sources/Chat/ChatControllerOpenMessageContextMenu.swift"
     signature = '    func openMessageContextMenu(message: EngineMessage, selectAll: Bool, node: ASDisplayNode, frame: CGRect, anyRecognizer: UIGestureRecognizer?, location: CGPoint?) -> Void {\n'
-    replace(context_menu, signature, signature + '        guard message.id.namespace != Int32.max - 42 else { return }\n')
+    replace(context_menu, signature, signature + '''        if message.id.namespace == Int32.max - 42 {
+            self.openLocalGiftContextMenu(message: message, selectAll: selectAll, recognizer: anyRecognizer)
+            return
+        }
+''')
+    replace(context_menu, 'extension ChatControllerImpl {\n', '''extension ChatControllerImpl {
+    private func openLocalGiftContextMenu(message: EngineMessage, selectAll: Bool, recognizer: UIGestureRecognizer?) {
+        guard self.presentationInterfaceState.interfaceState.selectionState == nil, let window = self.window else { return }
+        self.dismissAllTooltips()
+        self.chatDisplayNode.cancelInteractiveKeyboardGestures()
+        let source = ChatMessageContextExtractedContentSource(chatController: self, chatNode: self.chatDisplayNode, engine: self.context.engine, message: message, selectAll: selectAll)
+        let delete = ContextMenuActionItem(text: self.presentationData.strings.Conversation_ContextMenuDelete, textColor: .destructive, icon: { theme in
+            return generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Delete"), color: theme.contextMenu.destructiveColor)
+        }, action: { [weak self] _, complete in
+            complete(.default)
+            guard let self else { return }
+            let accountId = self.context.account.peerId
+            let peerId = message.id.peerId
+            let remove: (Bool) -> Void = { forEveryone in
+                VisualGramLocalAppearance.shared.hideChatGifts(accountId: accountId, peerId: peerId, messageId: message.id.id, forEveryone: forEveryone)
+            }
+            var actions = [TextAlertAction(type: .destructiveAction, title: "Удалить у меня", action: { remove(false) })]
+            if peerId != accountId {
+                actions.append(TextAlertAction(type: .destructiveAction, title: "Удалить у обоих", action: { remove(true) }))
+            }
+            actions.append(TextAlertAction(type: .genericAction, title: self.presentationData.strings.Common_Cancel, action: {}))
+            let alert = textAlertController(context: self.context, title: "Удалить подарок из чата?", text: "Карточка исчезнет из переписки. Подарок останется в профиле владельца.", actions: actions, actionLayout: .vertical)
+            self.present(alert, in: .window(.root))
+        })
+        let controller = makeContextController(presentationData: self.presentationData, source: .extracted(source),
+            items: .single(ContextController.Items(content: .list([.action(delete)]))),
+            recognizer: recognizer as? TapLongTapOrDoubleTapGestureRecognizer, gesture: recognizer as? ContextGesture,
+            disableScreenshots: self.presentationInterfaceState.copyProtectionEnabled || self.presentationInterfaceState.myCopyProtectionEnabled)
+        self.canReadHistory.set(false)
+        controller.dismissed = { [weak self] in self?.canReadHistory.set(true) }
+        self.currentContextController = controller
+        window.presentInGlobalOverlay(controller)
+    }
+
+''')
+    context_source = root / "submodules/TelegramUI/Sources/ChatMessageContextControllerContentSource.swift"
+    replace(context_source, '        if self.message.adAttribute != nil {\n', '        if self.message.id.namespace == Int32.max - 42 || self.message.adAttribute != nil {\n', expected=2)
+    remove_chat = core / "TelegramEngine/Peers/RemovePeerChat.swift"
+    replace(remove_chat, '    if let _ = transaction.getPeerChatInterfaceState(peerId) {\n', '''    VisualGramLocalAppearance.shared.hideChatGifts(accountId: account.peerId, peerId: peerId, forEveryone: deleteGloballyIfPossible)
+    if let _ = transaction.getPeerChatInterfaceState(peerId) {
+''')
+    clear_history = core / "TelegramEngine/Messages/TelegramEngineMessages.swift"
+    replace(clear_history, '            return _internal_clearHistoryInteractively(postbox: self.account.postbox, peerId: peerId, threadId: threadId, type: type)\n', '''            return _internal_clearHistoryInteractively(postbox: self.account.postbox, peerId: peerId, threadId: threadId, type: type)
+            |> afterCompleted { [account = self.account] in
+                if threadId == nil, type != .scheduledMessages {
+                    VisualGramLocalAppearance.shared.hideChatGifts(accountId: account.peerId, peerId: peerId, forEveryone: type == .forEveryone)
+                }
+            }
+''')
     controller = root / "submodules/TelegramUI/Sources/ChatController.swift"
     replace(controller, '        }, canSetupReply: { [weak self] message in\n', '        }, canSetupReply: { [weak self] message in\n            guard message.id.namespace != Int32.max - 42 else { return .none }\n')
 
@@ -276,6 +338,8 @@ private func visualGramGiftHasPremium(context: AccountContext) -> Bool {
     apply_activation(root)
     from apply_native_duckgram import apply_duckgram
     apply_duckgram(root)
+    from apply_native_money import apply_money
+    apply_money(root, project)
 
 
 if __name__ == "__main__":

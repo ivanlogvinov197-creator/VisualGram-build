@@ -32,6 +32,37 @@ def apply_shared(root):
         self.peerPresenceManager = PeerPresenceStatusManager(update: { [weak self] in
 ''')
     replace(item, '        self.cachedDataDisposable.dispose()\n', '        self.cachedDataDisposable.dispose()\n        self.visualGramAppearanceDisposable.dispose()\n')
+    replace(item, '            let useChatListLayout: Bool\n', '''            let visualGramGiftPreview: EngineMessage?
+            if case .chatList = item.chatListLocation,
+               case let .peer(peerData) = item.content,
+               !displayAsMessage, promoInfo == nil, peerData.customMessageListData == nil,
+               item.interaction.searchTextHighightState == nil,
+               let peer = peerData.peer.peer, case .user = peer {
+                visualGramGiftPreview = visualGramChatGiftMessages(
+                    accountPeerId: account.peerId,
+                    peer: peer,
+                    accountPeer: nil,
+                    fromTimestamp: peerData.messages.last?.timestamp,
+                    throughTimestamp: Int32(clamping: Int64(Date().timeIntervalSince1970)),
+                    includePremium: false
+                ).max { $0.index < $1.index }
+                if let visualGramGiftPreview {
+                    messages = [visualGramGiftPreview]
+                }
+            } else {
+                visualGramGiftPreview = nil
+            }
+
+            let useChatListLayout: Bool
+''')
+    replace(item, '                topIndex = peerData.messages.first?.index\n',
+            '                topIndex = visualGramGiftPreview?.index ?? peerData.messages.first?.index\n')
+    replace(item, '            if !isPeerGroup, let message = messages.last, message.author?.id == account.peerId && !hasDraft {\n', '''            if !hasDraft, let visualGramGiftPreview {
+                if !visualGramGiftPreview.flags.contains(.Incoming), visualGramGiftPreview.id.peerId != account.peerId {
+                    statusState = .delivered(item.presentationData.theme.chatList.checkmarkColor)
+                }
+            } else if !isPeerGroup, let message = messages.last, message.author?.id == account.peerId && !hasDraft {
+''')
 
     gift = root / "submodules/TelegramUI/Components/Gifts/GiftViewScreen/Sources/GiftViewScreen.swift"
     replace(gift, '        private var isVisualGramGift: Bool {\n', '        fileprivate var isVisualGramGift: Bool {\n')

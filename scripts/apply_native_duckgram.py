@@ -7,6 +7,57 @@ def apply_duckgram(root):
     ui = sub / 'TelegramUI'
     components = ui / 'Components'
     peer = components / 'PeerInfo/PeerInfoScreen/Sources'
+    rating = components / 'PeerInfo/ProfileLevelInfoScreen/Sources/ProfileLevelInfoScreen.swift'
+    replace(rating, '                        let dayCount = (pendingStarRating.timestamp - timestamp) / (24 * 60 * 60)\n',
+            '''                        let secondsPerDay: Int64 = 24 * 60 * 60
+                        let remaining = Int64(pendingStarRating.timestamp) - Int64(timestamp)
+                        let dayCount = remaining < secondsPerDay ? 0 : (remaining + secondsPerDay - 1) / secondsPerDay
+''')
+    replace(rating, 'Int32(pendingPoints)', 'Int32(clamping: pendingPoints)', expected=4)
+    replace(rating, '            var levelFraction: CGFloat\n', '''            func progress(for rating: TelegramStarRating) -> CGFloat {
+                if rating.stars < 0 { return 0.5 }
+                guard let next = rating.nextLevelStars else { return 1.0 }
+                if rating.stars >= next { return 1.0 }
+                if rating.stars <= rating.currentLevelStars { return 0.0 }
+                let completed = Decimal(rating.stars) - Decimal(rating.currentLevelStars)
+                let span = Decimal(next) - Decimal(rating.currentLevelStars)
+                return CGFloat(NSDecimalNumber(decimal: completed / span).doubleValue)
+            }
+
+            let levelFraction: CGFloat
+''')
+    replace(rating, '''                if let nextLevelStars = pendingStarRating.rating.nextLevelStars, nextLevelStars > pendingStarRating.rating.stars {
+                    levelFraction = Double(pendingStarRating.rating.stars - pendingStarRating.rating.currentLevelStars) / Double(nextLevelStars - pendingStarRating.rating.currentLevelStars)
+                } else {
+                    levelFraction = 1.0
+                }
+''', '                levelFraction = progress(for: pendingStarRating.rating)\n')
+    replace(rating, '''                if component.starRating.stars < 0 {
+                    levelFraction = 0.5
+                } else if let nextLevelStars = component.starRating.nextLevelStars {
+                    levelFraction = Double(component.starRating.stars - component.starRating.currentLevelStars) / Double(nextLevelStars - component.starRating.currentLevelStars)
+                } else {
+                    levelFraction = 1.0
+                }
+''', '                levelFraction = progress(for: component.starRating)\n')
+    replace(rating, '            levelFraction = max(0.0, levelFraction)\n', '')
+
+    tab_bar = components / 'TabBarComponent/Sources/TabBarComponent.swift'
+    replace(tab_bar, '            let itemsLayout = tabBarItemsLayout(', '''            if component.axis == .horizontal, !component.isCompact, unboundItemWidths.count == 2,
+               component.items.allSatisfy({ item in
+                   if case .tabBarItem = item.content { return true }
+                   return false
+               }) {
+                let widestItem = unboundItemWidths.max() ?? 0.0
+                let preferredWidth = max(196.0, 2.0 * (widestItem + innerInset))
+                availableLength = min(availableLength, preferredWidth)
+            }
+            let itemsLayout = tabBarItemsLayout(''')
+    replace(tab_bar, 'searchFrame = CGRect(origin: CGPoint(x: availableSize.width - searchSize.width, y: 0.0), size: searchSize)',
+            'searchFrame = CGRect(origin: CGPoint(x: size.width - searchSize.width, y: 0.0), size: searchSize)')
+    replace(peer / 'PeerInfoScreen.swift', '                if let primary = primaryAndOther.0, !primaryAndOther.1.isEmpty {\n',
+            '                if let primary = primaryAndOther.0 {\n')
+
     settings = peer / 'PeerInfoSettingsItems.swift'
     replace(settings, '    if let tonState = data.tonState {\n', '''    let duckGramWallet = VisualGramLocalAppearance.shared.appearance(accountId: context.account.peerId)
     if duckGramWallet.enabled, let grams = duckGramWallet.grams {

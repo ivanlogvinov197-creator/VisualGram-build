@@ -206,7 +206,30 @@ assert(resetCard.gramCardGiftIds == [] && resetCard.gramCardBackgroundId == nil 
 var secondCopy = first; secondCopy.localIdentifier = "another-copy"
 assert(VisualGramLocalAppearance.cardStickerAddress(first) != VisualGramLocalAppearance.cardStickerAddress(secondCopy), "two local copies shared sticker hit-test identity")
 
-print("PASS: GRAM precision/overflow, strict quote currency, debit/history, duplicate/insufficient balance, persistence; craft success/failure/consumption, retained history, unlock date, owner and replay guards")
+let money = VisualGramLocalAppearance()
+assert(money.localGramBalance(accountId: a) == nil)
+assert(money.topUpLocalGrams(accountId: a, amount: 1_000_000_001, now: 1))
+assert(money.transferLocalGrams(accountId: a, to: b, amount: 100_000_001, comment: "test", now: 2) == .sent)
+assert(money.localGramBalance(accountId: a) == 900_000_000 && money.localGramBalance(accountId: b) == 100_000_001)
+let outgoing = money.appearance(accountId: a).gramHistory!.last!
+let incoming = money.appearance(accountId: b).gramHistory!.last!
+assert(outgoing.id == incoming.id && outgoing.amount == -incoming.amount && outgoing.comment == "test")
+assert(outgoing.peerId == b.toInt64() && incoming.peerId == a.toInt64() && outgoing.kind == .transfer)
+assert(money.transferLocalGrams(accountId: a, to: a, amount: 1, comment: nil, now: 3) == .invalidRecipient)
+assert(money.transferLocalGrams(accountId: a, to: b, amount: 900_000_001, comment: nil, now: 3) == .insufficientBalance)
+assert(!money.topUpLocalGrams(accountId: a, amount: Int64.max, now: 3))
+money.values["20"]?.grams = Int64.max
+assert(money.transferLocalGrams(accountId: a, to: b, amount: 1, comment: nil, now: 4) == .overflow)
+assert(money.localGramBalance(accountId: a) == 900_000_000 && money.appearance(accountId: a).gramHistory?.count == 2)
+assert(money.appearance(accountId: b).gramHistory?.count == 1)
+money.beforeUpdate = { money.values["10"]?.grams = 0 }
+assert(money.transferLocalGrams(accountId: a, to: b, amount: 1, comment: nil, now: 4) == .insufficientBalance)
+let savedMoney = try! JSONDecoder().decode(VisualGramAppearance.self, from: JSONEncoder().encode(money.appearance(accountId: a)))
+assert(savedMoney.gramHistory?.last?.comment == "test")
+let oldGramEntry = #"{"id":"old","date":1,"amount":100,"kind":"topUp"}"#.data(using: .utf8)!
+assert(try! JSONDecoder().decode(VisualGramGift.StarsTransaction.self, from: oldGramEntry).comment == nil)
+
+print("PASS: GRAM precision, overflow, local transfers, paired history, strict quote currency, stale/insufficient balance, persistence; craft consumption, retained history, unlock date, owner and replay guards")
 '''
 
 
