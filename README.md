@@ -1,9 +1,9 @@
 # Telegram with local visual profiles
 
-Build patches for official Telegram-iOS revision `279f89e4d4f63f17227bf877dc3d8990f22ecd58`.
+Build patches for official Telegram-iOS revision `24638bc69bd083981b178dd1e7f921eebbf7fc46`.
 These patches provide local gifts, scheduled gift delivery, profile appearance,
 chat badges and shared appearance across accounts on the same device.
-Telegram 13.1.2 adds local gift crafting, a GRAM balance and transaction history,
+DuckGram on Telegram 13.2 adds local gift crafting, a GRAM balance and transaction history,
 NFT-decorated wallet cards, native profile/business editors, swipeable gift/username lists, second-precision scheduling and a wallet-card placement editor.
 Visual appearance requires a signed server lease: 24-hour device trial, then a lifetime activation code bound to one device key.
 They do not change server ownership, payments, verification or subscriptions.
