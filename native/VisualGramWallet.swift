@@ -25,10 +25,9 @@ public extension VisualGramLocalAppearance {
         return value.enabled ? value.grams : nil
     }
 
-    func transferLocalGrams(accountId: EnginePeer.Id, to recipient: EnginePeer.Id, amount: Int64, comment: String?, now: Int32) -> VisualGramGramTransferResult {
+    func transferLocalGrams(accountId: EnginePeer.Id, to recipient: EnginePeer.Id, amount: Int64, comment: String?, now: Int32, transferId: String = UUID().uuidString) -> VisualGramGramTransferResult {
         guard recipient != accountId, recipient.namespace == Namespaces.Peer.CloudUser else { return .invalidRecipient }
         guard amount > 0 else { return .unavailable }
-        let id = UUID().uuidString
         let senderKey = String(accountId.toInt64())
         let recipientKey = String(recipient.toInt64())
         var result: VisualGramGramTransferResult = .unavailable
@@ -45,8 +44,8 @@ public extension VisualGramLocalAppearance {
             receiver.enabled = true
             var outgoing = sender.gramHistory ?? []
             var incoming = receiver.gramHistory ?? []
-            outgoing.append(.init(id: id, date: now, amount: -amount, kind: .transfer, title: "Исходящий перевод", peerId: recipient.toInt64(), gift: nil, comment: comment))
-            incoming.append(.init(id: id, date: now, amount: amount, kind: .transfer, title: "Входящий перевод", peerId: accountId.toInt64(), gift: nil, comment: comment))
+            outgoing.append(.init(id: transferId, date: now, amount: -amount, kind: .transfer, title: "Исходящий перевод", peerId: recipient.toInt64(), gift: nil, comment: comment))
+            incoming.append(.init(id: transferId, date: now, amount: amount, kind: .transfer, title: "Входящий перевод", peerId: accountId.toInt64(), gift: nil, comment: comment))
             sender.gramHistory = outgoing
             receiver.gramHistory = incoming
             values[senderKey] = sender
