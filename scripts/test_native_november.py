@@ -211,10 +211,10 @@ assert(money.localGramBalance(accountId: a) == nil)
 assert(money.topUpLocalGrams(accountId: a, amount: 1_000_000_001, now: 1))
 assert(money.transferLocalGrams(accountId: a, to: b, amount: 100_000_001, comment: "test", now: 2) == .sent)
 assert(money.localGramBalance(accountId: a) == 900_000_000 && money.localGramBalance(accountId: b) == 100_000_001)
-let outgoing = money.appearance(accountId: a).gramHistory!.last!
-let incoming = money.appearance(accountId: b).gramHistory!.last!
-assert(outgoing.id == incoming.id && outgoing.amount == -incoming.amount && outgoing.comment == "test")
-assert(outgoing.peerId == b.toInt64() && incoming.peerId == a.toInt64() && outgoing.kind == .transfer)
+let gramDebit = money.appearance(accountId: a).gramHistory!.last!
+let gramCredit = money.appearance(accountId: b).gramHistory!.last!
+assert(gramDebit.id == gramCredit.id && gramDebit.amount == -gramCredit.amount && gramDebit.comment == "test")
+assert(gramDebit.peerId == b.toInt64() && gramCredit.peerId == a.toInt64() && gramDebit.kind == .transfer)
 assert(money.transferLocalGrams(accountId: a, to: a, amount: 1, comment: nil, now: 3) == .invalidRecipient)
 assert(money.transferLocalGrams(accountId: a, to: b, amount: 900_000_001, comment: nil, now: 3) == .insufficientBalance)
 assert(!money.topUpLocalGrams(accountId: a, amount: Int64.max, now: 3))
