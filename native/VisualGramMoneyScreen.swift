@@ -1,57 +1,36 @@
-import UIKit
+import Foundation
 import AccountContext
-import AlertComponent
-import AlertMultilineInputFieldComponent
-import ComponentFlow
-import Display
-import PresentationDataUtils
 import SwiftSignalKit
 import TelegramCore
-import TelegramPresentationData
 import WalletContext
 
 public func visualGramTransferAddress(_ input: String) -> String? {
     let input = input.trimmingCharacters(in: .whitespacesAndNewlines)
-    if VisualGramLocalAppearance.visualWalletPeer(address: input) != nil {
-        return input
+    if let peerId = VisualGramLocalAppearance.visualWalletPeer(address: input) {
+        return VisualGramLocalAppearance.visualWalletAddress(peerId: peerId)
     }
     return WalletContext.transferRecipient(from: input)?.address
 }
 
-public func presentGramTopUp(on controller: ViewController, context: AccountContext, data: PresentationData) {
-    let input = AlertMultilineInputFieldComponent.ExternalState()
-    let alert = AlertScreen(
-        configuration: .init(dismissOnOutsideTap: false, allowInputInset: true),
-        content: [
-            AnyComponentWithIdentity(id: "title", component: AnyComponent(AlertTitleComponent(title: data.strings.Wallet_AddFunds))),
-            AnyComponentWithIdentity(id: "amount", component: AnyComponent(AlertMultilineInputFieldComponent(
-                context: context,
-                initialValue: NSAttributedString(string: ""),
-                placeholder: data.strings.Wallet_Send_AmountPlaceholder,
-                maxHeight: 56,
-                returnKeyType: .done,
-                keyboardType: .decimalPad,
-                autocapitalizationType: .none,
-                autocorrectionType: .no,
-                isInitiallyFocused: true,
-                externalState: input
-            )))
-        ],
-        actions: [
-            .init(title: data.strings.Common_Cancel),
-            .init(title: data.strings.Wallet_AddFunds, type: .default, action: { [weak controller] in
-                guard let controller else { return }
-                let amount = VisualGramLocalAppearance.parseGrams(input.value.string) ?? 0
-                if !VisualGramLocalAppearance.shared.topUpLocalGrams(accountId: context.account.peerId, amount: amount, now: Int32(clamping: Int64(Date().timeIntervalSince1970))) {
-                    controller.present(textAlertController(context: context, title: nil, text: data.strings.Wallet_Transfer_ErrorText, actions: [
-                        TextAlertAction(type: .defaultAction, title: data.strings.Common_OK, action: {})
-                    ]), in: .window(.root))
-                }
-            })
-        ],
-        updatedPresentationData: (initial: data, signal: context.sharedContext.presentationData)
+public func initialVisualGramWalletState(context: AccountContext) -> WalletContext.State {
+    let accountId = context.account.peerId
+    let appearance = VisualGramLocalAppearance.shared.appearance(accountId: accountId)
+    return makeVisualGramWalletState(accountId: accountId, appearance: appearance, transactions: [])
+}
+
+private func makeVisualGramWalletState(accountId: EnginePeer.Id, appearance: VisualGramAppearance, transactions: [WalletContext.Transaction]) -> WalletContext.State {
+    let card = VisualGramLocalAppearance.shared.displayWalletCard(accountId: accountId, peerId: accountId, server: nil, appearanceOverride: appearance)
+    let balance = appearance.enabled ? (appearance.grams ?? 0) : 0
+    return WalletContext.State(
+        phase: .wallet(.init(address: VisualGramLocalAppearance.visualWalletAddress(peerId: accountId), publicKey: "")),
+        balance: .value(balance, updatedAt: Int32(clamping: Int64(Date().timeIntervalSince1970))),
+        transactions: .init(items: transactions, offset: 0, canLoadMore: false, isLoadingMore: false, error: nil),
+        pendingTransfers: [],
+        activeOperation: nil,
+        cardStickers: (card?.stickers ?? []).compactMap {
+            WalletContext.CardSticker(serverSticker: $0, backgroundNftAddress: card?.backgroundNft?.address)
+        }
     )
-    controller.present(alert, in: .window(.root))
 }
 
 public func visualGramWalletState(context: AccountContext) -> Signal<WalletContext.State, NoError> {
@@ -60,16 +39,15 @@ public func visualGramWalletState(context: AccountContext) -> Signal<WalletConte
     return store.changes
     |> mapToSignal { _ -> Signal<WalletContext.State, NoError> in
         let appearance = store.appearance(accountId: accountId)
-        let entries = appearance.enabled ? (appearance.gramHistory ?? []) : []
+        let entries = appearance.enabled ? VisualGramBalanceHistory.grams.displayedEntries(in: appearance) : []
         let peerIds = Set(entries.compactMap { $0.peerId.map { EnginePeer.Id($0) } })
         let peers = context.engine.data.get(EngineDataMap(peerIds.map { TelegramEngine.EngineData.Item.Peer.Peer(id: $0) }))
-        let card = store.displayWalletCard(accountId: accountId, peerId: accountId, server: nil, appearanceOverride: appearance)
         return peers |> map { peers in
-            let transactions = entries.reversed().sorted { $0.date > $1.date }.map { entry -> WalletContext.Transaction in
+            let transactions = entries.map { entry -> WalletContext.Transaction in
                 let peer = entry.peerId.flatMap { peers[EnginePeer.Id($0)] ?? nil }
-                let address = entry.walletAddress ?? entry.peerId.map {
-                    VisualGramLocalAppearance.visualWalletAddress(peerId: EnginePeer.Id($0))
-                }
+                let peerId = entry.peerId.map { EnginePeer.Id($0) }
+                    ?? entry.walletAddress.flatMap { VisualGramLocalAppearance.visualWalletPeer(address: $0) }
+                let address = peerId.map { VisualGramLocalAppearance.visualWalletAddress(peerId: $0) } ?? entry.walletAddress
                 let counterparty: WalletContext.Transaction.Peer
                 if let peer, let address {
                     counterparty = .user(peer, address: address, domain: nil)
@@ -90,17 +68,7 @@ public func visualGramWalletState(context: AccountContext) -> Signal<WalletConte
                     comment: entry.comment
                 )
             }
-            let balance = appearance.enabled ? (appearance.grams ?? 0) : 0
-            return WalletContext.State(
-                phase: .wallet(.init(address: VisualGramLocalAppearance.visualWalletAddress(peerId: accountId), publicKey: "")),
-                balance: .value(balance, updatedAt: Int32(clamping: Int64(Date().timeIntervalSince1970))),
-                transactions: .init(items: transactions, offset: 0, canLoadMore: false, isLoadingMore: false, error: nil),
-                pendingTransfers: [],
-                activeOperation: nil,
-                cardStickers: (card?.stickers ?? []).compactMap {
-                    WalletContext.CardSticker(serverSticker: $0, backgroundNftAddress: card?.backgroundNft?.address)
-                }
-            )
+            return makeVisualGramWalletState(accountId: accountId, appearance: appearance, transactions: transactions)
         }
     }
 }

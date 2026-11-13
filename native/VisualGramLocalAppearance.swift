@@ -49,6 +49,17 @@ public struct VisualGramGift: Codable, Equatable {
     public struct StarsTransaction: Codable, Equatable {
         public static let upgradeTitle = "Улучшение подарка"
         public enum Kind: String, Codable { case topUp, purchase, sale, transfer, adjustment }
+        public struct HistoryEdit: Codable, Equatable {
+            public let amount: Int64
+            public let date: Int32
+            public let comment: String?
+
+            public init(amount: Int64, date: Int32, comment: String?) {
+                self.amount = amount
+                self.date = date
+                self.comment = comment
+            }
+        }
         public var id: String
         public var date: Int32
         public var amount: Int64
@@ -58,6 +69,8 @@ public struct VisualGramGift: Codable, Equatable {
         public var gift: StarGift?
         public var comment: String?
         public var walletAddress: String?
+        var historyEdit: HistoryEdit?
+        var hiddenFromBalanceHistory: Bool?
 
         public init(id: String, date: Int32, amount: Int64, kind: Kind, title: String?, peerId: Int64?, gift: StarGift?, comment: String? = nil, walletAddress: String? = nil) {
             self.id = id
@@ -199,6 +212,7 @@ public struct VisualGramAppearance: Codable, Equatable {
     public var grams: Int64?
     public var gramStarsPerUnit: Int64?
     public var gramHistory: [VisualGramGift.StarsTransaction]?
+    var gramHistoryOrder: [String]?
     public var gramCardGiftIds: [String]?
     public var gramCardBackgroundId: String?
     public var gramCardPlacements: [String: VisualGramGift.CardPlacement]?
@@ -213,6 +227,7 @@ public struct VisualGramAppearance: Codable, Equatable {
     public var businessLocation: TelegramBusinessLocation?
     public var giftPurchaseCounts: [String: Int32]?
     public var starsHistory: [VisualGramGift.StarsTransaction]?
+    var starsHistoryOrder: [String]?
     public var collections: [VisualGramGiftCollection]?
     public var scheduledGifts: [VisualGramScheduledGift]?
     public var peerOverrides: [String: VisualGramAppearance]?

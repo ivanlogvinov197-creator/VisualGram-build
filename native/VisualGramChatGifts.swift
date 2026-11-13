@@ -1,8 +1,33 @@
 import Foundation
 import Postbox
 
+public func visualGramChatPreviewPeerIds(accountId: EnginePeer.Id) -> Set<EnginePeer.Id> {
+    visualGramChatPreviewPeerIds(accountId: accountId, profiles: VisualGramLocalAppearance.shared.snapshotValues())
+}
+
+func visualGramChatPreviewPeerIds(accountId: EnginePeer.Id, profiles: [String: VisualGramAppearance]) -> Set<EnginePeer.Id> {
+    let account = accountId.toInt64()
+    var ids = Set<Int64>()
+    for (key, profile) in profiles where profile.enabled {
+        guard let peer = Int64(key) else { continue }
+        if peer == account {
+            ids.formUnion(profile.gifts.compactMap(\.counterpartyId))
+            ids.formUnion((profile.premiumGifts ?? []).map(\.recipientId))
+            ids.formUnion((profile.gramHistory ?? []).filter { $0.kind == .transfer }.compactMap(\.peerId))
+        } else if profile.gifts.contains(where: { $0.counterpartyId == account })
+                    || (profile.premiumGifts ?? []).contains(where: { $0.recipientId == account }) {
+            ids.insert(peer)
+        }
+    }
+    return Set(ids.compactMap { id -> EnginePeer.Id? in
+        guard id > 0, id < (Int64(1) << 59) else { return nil }
+        let peer = EnginePeer.Id(id)
+        return peer != accountId && peer.namespace == Namespaces.Peer.CloudUser ? peer : nil
+    })
+}
+
 // These messages are rendered from the local gift store in both chat surfaces.
-public func visualGramChatGiftMessages(accountPeerId ownId: EnginePeer.Id, peer: EnginePeer, accountPeer: EnginePeer?, fromTimestamp: Int32?, throughTimestamp: Int32?, includePremium: Bool = true) -> [EngineMessage] {
+public func visualGramChatGiftMessages(accountPeerId ownId: EnginePeer.Id, peer: EnginePeer, accountPeer: EnginePeer?, fromTimestamp: Int32?, throughTimestamp: Int32?) -> [EngineMessage] {
     let peerId = peer.id
     guard peerId.namespace == Namespaces.Peer.CloudUser else { return [] }
     let localGifts = VisualGramLocalAppearance.shared.chatGifts(accountId: ownId, peerId: peerId)
@@ -57,7 +82,7 @@ public func visualGramChatGiftMessages(accountPeerId ownId: EnginePeer.Id, peer:
             appendGift(identifier: transfer.id, date: transfer.date, version: 0, incoming: incoming, author: incoming ? chatPeer : ownPeer, action: .gramTransfer(amount: abs(transfer.amount), peerAddress: VisualGramLocalAppearance.visualWalletAddress(peerId: chatPeer.id), transactionId: transfer.id, comment: transfer.comment, commentEncrypted: false))
         }
     }
-    if includePremium && peerId != ownId {
+    if peerId != ownId {
         for (sender, recipient, incoming) in [(ownId, peerId, false), (peerId, ownId, true)] {
             let appearance = VisualGramLocalAppearance.shared.appearance(accountId: ownId, targetPeerId: sender)
             guard appearance.enabled else { continue }

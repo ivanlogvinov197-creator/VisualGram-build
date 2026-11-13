@@ -4,7 +4,8 @@ import Postbox
 public extension VisualGramLocalAppearance {
     func starsHistoryTransactions(accountId: EnginePeer.Id, mode: StarsTransactionsContext.Mode, peers: [Int64: EnginePeer], ton: Bool = false) -> [StarsContext.State.Transaction] {
         let value = self.appearance(accountId: accountId)
-        return ((ton ? value.gramHistory : value.starsHistory) ?? []).reversed().sorted { $0.date > $1.date }.filter { entry in
+        let currency: VisualGramBalanceHistory = ton ? .grams : .stars
+        return currency.displayedEntries(in: value).filter { entry in
             switch mode {
             case .all: return true
             case .incoming: return entry.amount > 0
@@ -23,7 +24,7 @@ public extension VisualGramLocalAppearance {
             return StarsContext.State.Transaction(
                 flags: flags, id: (ton ? "vg-grams:" : "vg-stars:") + entry.id,
                 count: CurrencyAmount(amount: StarsAmount(value: max(-Int64.max, entry.amount), nanos: 0), currency: ton ? .ton : .stars),
-                date: entry.date, peer: peer, title: entry.title ?? (entry.kind == .adjustment && entry.amount < 0 ? (ton ? "Списание GRAM" : "Списание звёзд") : nil), description: nil, photo: nil,
+                date: entry.date, peer: peer, title: entry.title ?? (entry.kind == .adjustment && entry.amount < 0 ? (ton ? "Списание GRAM" : "Списание звёзд") : nil), description: entry.comment, photo: nil,
                 transactionDate: entry.date, transactionUrl: nil, paidMessageId: nil, giveawayMessageId: nil,
                 media: [], subscriptionPeriod: nil, starGift: entry.gift, floodskipNumber: nil,
                 starrefCommissionPermille: nil, starrefPeerId: nil, starrefAmount: nil, paidMessageCount: nil,

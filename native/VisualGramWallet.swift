@@ -1,7 +1,43 @@
 import Foundation
+import CryptoKit
 
 public enum VisualGramGramTransferResult: Equatable {
     case sent, insufficientBalance, invalidRecipient, overflow, unavailable
+}
+
+public enum VisualGramBalanceHistory: Equatable {
+    case stars, grams
+
+    fileprivate var entries: WritableKeyPath<VisualGramAppearance, [VisualGramGift.StarsTransaction]?> {
+        switch self {
+        case .stars: return \.starsHistory
+        case .grams: return \.gramHistory
+        }
+    }
+
+    fileprivate var order: WritableKeyPath<VisualGramAppearance, [String]?> {
+        switch self {
+        case .stars: return \.starsHistoryOrder
+        case .grams: return \.gramHistoryOrder
+        }
+    }
+
+    public func displayedEntries(in appearance: VisualGramAppearance, editorOrder: Bool = false) -> [VisualGramGift.StarsTransaction] {
+        let visible = (appearance[keyPath: self.entries] ?? []).reversed().compactMap { entry -> VisualGramGift.StarsTransaction? in
+            guard entry.hiddenFromBalanceHistory != true else { return nil }
+            guard let edit = entry.historyEdit else { return entry }
+            var displayed = entry
+            displayed.amount = edit.amount
+            displayed.date = edit.date
+            displayed.comment = edit.comment
+            return displayed
+        }.sorted { $0.date > $1.date }
+        guard editorOrder, let order = appearance[keyPath: self.order] else { return visible }
+        let savedIds = Set(order)
+        var entriesById: [String: VisualGramGift.StarsTransaction] = [:]
+        for entry in visible { entriesById[entry.id] = entry }
+        return visible.filter { !savedIds.contains($0.id) } + order.compactMap { entriesById[$0] }
+    }
 }
 
 public extension VisualGramLocalAppearance {
@@ -20,24 +56,105 @@ public extension VisualGramLocalAppearance {
         NSDecimalNumber(decimal: Decimal(nano) / Decimal(gramScale)).stringValue
     }
 
+    func saveBalanceHistoryOrder(target: EnginePeer.Id, currency: VisualGramBalanceHistory, ids: [String]) -> Bool {
+        var saved = false
+        self.updateValues(recordOperations: false) { values in
+            let key = String(target.toInt64())
+            guard var value = values[key] else { return }
+            let current = currency.displayedEntries(in: value).map(\.id)
+            let requested = Set(ids)
+            guard ids.count == current.count, requested.count == ids.count, requested == Set(current) else { return }
+            value[keyPath: currency.order] = ids
+            values[key] = value
+            saved = true
+        }
+        return saved
+    }
+
+    func editBalanceHistoryEntry(target: EnginePeer.Id, currency: VisualGramBalanceHistory, id: String, edit: VisualGramGift.StarsTransaction.HistoryEdit) -> Bool {
+        guard edit.amount != 0, edit.amount != Int64.min else { return false }
+        return self.updateBalanceHistoryEntry(target: target, currency: currency, id: id) {
+            guard ($0.amount < 0) == (edit.amount < 0) else { return false }
+            $0.historyEdit = edit
+            return true
+        }
+    }
+
+    func deleteBalanceHistoryEntry(target: EnginePeer.Id, currency: VisualGramBalanceHistory, id: String) -> Bool {
+        self.updateBalanceHistoryEntry(target: target, currency: currency, id: id) {
+            $0.hiddenFromBalanceHistory = true
+            return true
+        }
+    }
+
+    private func updateBalanceHistoryEntry(target: EnginePeer.Id, currency: VisualGramBalanceHistory, id: String, _ update: (inout VisualGramGift.StarsTransaction) -> Bool) -> Bool {
+        var saved = false
+        self.updateValues(recordOperations: false) { values in
+            let key = String(target.toInt64())
+            guard var value = values[key], var entries = value[keyPath: currency.entries],
+                  let index = entries.firstIndex(where: { $0.id == id && $0.hiddenFromBalanceHistory != true }),
+                  update(&entries[index]) else { return }
+            if entries[index].hiddenFromBalanceHistory == true {
+                value[keyPath: currency.order]?.removeAll { $0 == id }
+            }
+            value[keyPath: currency.entries] = entries
+            values[key] = value
+            saved = true
+        }
+        return saved
+    }
+
     static func visualWalletAddress(peerId: EnginePeer.Id) -> String {
-        let digits = String(UInt64(bitPattern: peerId.toInt64()), radix: 16)
-        let alphabet = Array("abcdefghijklmnop")
-        return "dg" + String(digits.compactMap { $0.hexDigitValue.map { alphabet[$0] } })
+        let number = UInt64(bitPattern: peerId.toInt64())
+        let peerBytes = (0 ..< 8).map { UInt8(truncatingIfNeeded: number >> ((7 - $0) * 8)) }
+        let entropy = Array(SHA256.hash(data: Data("DuckGram wallet:".utf8) + Data(peerBytes)))
+        let maskedPeer = zip(peerBytes, entropy.prefix(8)).map { $0.0 ^ $0.1 }
+        var bytes: [UInt8] = [0x51, 0]
+        bytes.append(contentsOf: entropy.prefix(24))
+        bytes.append(contentsOf: maskedPeer)
+        // Keep TON's visible format but deliberately fail its checksum validation.
+        let checksum = bytes.reduce(UInt16(0)) { crc, byte in
+            (0 ..< 8).reduce(crc ^ (UInt16(byte) << 8)) { value, _ in
+                (value << 1) ^ (value & 0x8000 == 0 ? 0 : 0x1021)
+            }
+        } ^ UInt16.max
+        bytes += [UInt8(checksum >> 8), UInt8(truncatingIfNeeded: checksum)]
+        return Data(bytes).base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
     }
 
     static func visualWalletPeer(address: String) -> EnginePeer.Id? {
-        guard address.hasPrefix("dg") else { return nil }
-        let payload = address.dropFirst(2)
-        guard !payload.isEmpty, payload.count <= 16,
-              payload.allSatisfy({ "abcdefghijklmnop".contains($0) }) else { return nil }
-        let alphabet = Array("abcdefghijklmnop")
-        let number = payload.reduce(UInt64(0)) { value, character in
-            (value << 4) | UInt64(alphabet.firstIndex(of: character) ?? 0)
+        let number: UInt64
+        if address.hasPrefix("UQ"), address.utf8.count == 48,
+           let data = Data(base64Encoded: address.replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")),
+           data.count == 36 {
+            let bytes = Array(data)
+            number = zip(bytes[26 ..< 34], bytes[2 ..< 10]).reduce(UInt64(0)) { value, pair in
+                (value << 8) | UInt64(pair.0 ^ pair.1)
+            }
+        } else if let legacyNumber = Self.legacyVisualWalletNumber(address: address) {
+            number = legacyNumber
+        } else {
+            return nil
         }
         guard number > 0, number < (UInt64(1) << 59), (number >> 32) & 7 == 0 else { return nil }
         let peerId = EnginePeer.Id(Int64(number))
-        return peerId.namespace == Namespaces.Peer.CloudUser && Self.visualWalletAddress(peerId: peerId) == address ? peerId : nil
+        guard peerId.namespace == Namespaces.Peer.CloudUser else { return nil }
+        return address.hasPrefix("dg") || Self.visualWalletAddress(peerId: peerId) == address ? peerId : nil
+    }
+
+    private static func legacyVisualWalletNumber(address: String) -> UInt64? {
+        guard address.hasPrefix("dg") else { return nil }
+        let payload = address.dropFirst(2)
+        guard !payload.isEmpty, payload.first != "a", payload.count <= 16 else { return nil }
+        let alphabet = Array("abcdefghijklmnop")
+        var number = UInt64(0)
+        for character in payload {
+            guard let digit = alphabet.firstIndex(of: character) else { return nil }
+            number = (number << 4) | UInt64(digit)
+        }
+        return number
     }
 
     func transferLocalGrams(accountId: EnginePeer.Id, toAddress address: String, amount: Int64, comment: String?, now: Int32, transferId: String) -> VisualGramGramTransferResult {
@@ -153,7 +270,6 @@ public extension VisualGramLocalAppearance {
         if let local = selected.first(where: { $0.identifier == value.gramCardBackgroundId }) {
             background = stickers.first(where: { $0.nft.address == Self.cardStickerAddress(local) })?.nft
         }
-        // Empty address keeps the native receive/QR action unavailable for a local card.
         return WalletCard(address: Self.visualWalletAddress(peerId: peerId), balance: grams, stickers: stickers, backgroundNft: background)
     }
 

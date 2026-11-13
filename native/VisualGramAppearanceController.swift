@@ -225,6 +225,8 @@ private final class VisualGramAppearanceActions {
                 }
             }
         case 33: self.controller?.push(VisualGramCardEditorController(context: self.context, target: self.targetPeerId))
+        case 34: self.openBalanceHistory(.stars)
+        case 35: self.openBalanceHistory(.grams)
         case 30:
             self.form(title: "Баланс звёзд", fields: [("Баланс", self.appearance.stars.map(String.init) ?? "")]) { [weak self] values in
                 guard let self, values.count == 1 else { return }
@@ -614,6 +616,68 @@ private final class VisualGramAppearanceActions {
         self.editUsername(index: index)
     }
 
+    private func openBalanceHistory(_ currency: VisualGramBalanceHistory) {
+        let store = VisualGramLocalAppearance.shared
+        let account = self.context.account.peerId
+        let target = self.targetPeerId
+        let grams = currency == .grams
+        let unit = grams ? "GRAM" : "★"
+        let formatter = DateFormatter()
+        formatter.dateFormat = "dd.MM.yyyy HH:mm:ss"
+        let entries: () -> [VisualGramGift.StarsTransaction] = {
+            currency.displayedEntries(in: store.appearance(accountId: account, targetPeerId: target), editorOrder: true)
+        }
+        let formatAmount: (Int64) -> String = { amount in
+            let text = grams ? VisualGramLocalAppearance.formatGrams(amount) : String(amount)
+            return amount > 0 ? "+" + text : text
+        }
+        let edit: (String) -> Void = { [weak self] id in
+            guard let self, let entry = entries().first(where: { $0.id == id }) else { return }
+            let form = VisualGramDetailsController(context: self.context, title: "Изменить операцию", fields: [
+                ("Сумма · " + unit, formatAmount(entry.amount)),
+                ("Комментарий", entry.comment ?? "")
+            ], date: entry.date, seconds: true, showFieldLabels: true, save: { [weak self] fields, date in
+                guard let self, fields.count == 2 else { return false }
+                let input = fields[0].trimmingCharacters(in: .whitespacesAndNewlines)
+                let magnitude = input.hasPrefix("-") || input.hasPrefix("+") ? String(input.dropFirst()) : input
+                let amount = grams ? VisualGramLocalAppearance.parseGrams(magnitude) : Int64(magnitude)
+                guard let amount, amount > 0 else { self.message("Введи сумму больше нуля."); return false }
+                let signed = input.hasPrefix("-") || (!input.hasPrefix("+") && entry.amount < 0) ? -amount : amount
+                guard (signed < 0) == (entry.amount < 0) else { self.message("У операции должен остаться исходный знак суммы."); return false }
+                let comment = fields[1].trimmingCharacters(in: .whitespacesAndNewlines)
+                let edit = VisualGramGift.StarsTransaction.HistoryEdit(amount: signed, date: date, comment: comment.isEmpty ? nil : comment)
+                guard store.editBalanceHistoryEntry(target: target, currency: currency, id: id, edit: edit) else {
+                    self.message("Операция больше недоступна.")
+                    return false
+                }
+                return true
+            })
+            self.controller?.push(form)
+        }
+        self.controller?.push(VisualGramListController(context: self.context, target: target, title: grams ? "Мои операции GRAM" : "Мои операции звёзд", rows: {
+            entries().map { entry in
+                let title: String
+                switch entry.kind {
+                case .topUp: title = "Пополнение"
+                case .purchase: title = "Покупка"
+                case .sale: title = "Продажа"
+                case .transfer: title = entry.amount < 0 ? "Исходящий перевод" : "Входящий перевод"
+                case .adjustment: title = entry.amount < 0 ? "Списание" : "Начисление"
+                }
+                let date = formatter.string(from: Date(timeIntervalSince1970: TimeInterval(entry.date)))
+                let details = [date, entry.comment ?? entry.walletAddress ?? entry.peerId.map { "ID \($0)" }].compactMap { $0 }.joined(separator: "\n")
+                let gift = entry.gift.map { VisualGramGift(gift: $0, counterpartyId: entry.peerId, date: entry.date, text: "") }
+                return .init(id: entry.id, title: "\(formatAmount(entry.amount)) \(unit) · \(entry.title ?? title)", subtitle: details, gift: gift)
+            }
+        }, reorder: { ids in
+            store.saveBalanceHistoryOrder(target: target, currency: currency, ids: ids)
+        }, open: edit, edit: edit, delete: { [weak self] id in
+            if !store.deleteBalanceHistoryEntry(target: target, currency: currency, id: id) {
+                self?.message("Операция больше недоступна.")
+            }
+        }, deleteConfirmation: "Запись исчезнет из истории баланса. Сумма на балансе не изменится."))
+    }
+
     private func openGiftList(history: Bool) {
         guard history else { self.showGiftList(history: false, names: [:]); return }
         let operations = VisualGramLocalAppearance.giftOperations(in: self.appearance)
@@ -821,8 +885,10 @@ func visualGramAppearanceController(context: AccountContext) -> ViewController {
             default:
                 add(30, 0, "Баланс звёзд", .button(value.stars.map(String.init) ?? "Настоящий баланс"))
                 add(31, 0, "Добавить операцию", .button(""))
+                add(34, 0, "Мои операции звёзд", .button(""))
                 add(32, 1, "Баланс GRAM", .button(value.grams.map { VisualGramLocalAppearance.formatGrams($0) } ?? "Не задан"))
                 add(33, 1, "Оформить карточку GRAM", .button(""))
+                add(35, 1, "Мои операции GRAM", .button(""))
             }
         }
         }
