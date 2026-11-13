@@ -8,13 +8,15 @@ import test_native_trading as trading
 def source():
     root = Path(__file__).resolve().parents[1]
     base = trading.source().split('func unique(')[0]
-    base = base.replace('var stars: Int64?', 'var stars: Int64?\n    var grams: Int64?\n    var gramStarsPerUnit: Int64?\n    var gramHistory: [VisualGramGift.StarsTransaction]?')
+    base = base.replace('var stars: Int64?', 'var stars: Int64?\n    var grams: Int64?\n    var gramStarsPerUnit: Int64?\n    var gramHistory: [VisualGramGift.StarsTransaction]?\n    var starsHistoryOrder: [String]?\n    var gramHistoryOrder: [String]?')
     wallet = (root / 'native/VisualGramWallet.swift').read_text(encoding='utf-8')
     wallet = wallet[:wallet.index('    func displayWalletCard(')] + wallet[wallet.index('    func giftForLocalPurchase('):]
     wallet = '\n'.join(line for line in wallet.splitlines() if not line.startswith('import '))
     craft = (root / 'native/VisualGramGiftCrafting.swift').read_text(encoding='utf-8')
     craft = '\n'.join(line for line in craft.splitlines() if not line.startswith('import '))
-    return base + '\n' + 'public enum CraftStarGiftError { case generic, unavailable, craftFailed, tooEarly(Int32) }\n' + wallet + '\n' + craft + CHECKS
+    chat = (root / 'native/VisualGramChatGifts.swift').read_text(encoding='utf-8')
+    preview_peers = chat[chat.index('func visualGramChatPreviewPeerIds(accountId: EnginePeer.Id, profiles:'):chat.index('// These messages')]
+    return base + '\n' + 'public enum CraftStarGiftError { case generic, unavailable, craftFailed, tooEarly(Int32) }\n' + wallet + '\n' + craft + '\n' + preview_peers + CHECKS
 
 
 CHECKS = r'''
@@ -208,9 +210,23 @@ assert(VisualGramLocalAppearance.cardStickerAddress(first) != VisualGramLocalApp
 
 let addressA = VisualGramLocalAppearance.visualWalletAddress(peerId: a)
 let addressB = VisualGramLocalAppearance.visualWalletAddress(peerId: b)
-assert(addressA != addressB && addressA.allSatisfy(\.isLetter))
+assert(addressA != addressB && addressA.hasPrefix("UQ") && addressA.utf8.count == 48)
+assert(addressA.range(of: "^[A-Za-z0-9_-]{48}$", options: .regularExpression) != nil)
 assert(VisualGramLocalAppearance.visualWalletPeer(address: addressB) == b)
+assert(VisualGramLocalAppearance.visualWalletPeer(address: "dgbe") == b, "Previously shared QR codes must still work")
+assert(VisualGramLocalAppearance.visualWalletPeer(address: "dgabe") == nil)
 assert(VisualGramLocalAppearance.visualWalletPeer(address: "dg!") == nil)
+let alteredAddress = String(addressB.dropLast()) + (addressB.last == "A" ? "B" : "A")
+assert(VisualGramLocalAppearance.visualWalletPeer(address: alteredAddress) == nil)
+let addressBytes = Array(Data(base64Encoded: addressA.replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/"))!)
+var tonChecksum: UInt16 = 0
+for byte in addressBytes.prefix(34) {
+    tonChecksum ^= UInt16(byte) << 8
+    for _ in 0 ..< 8 {
+        tonChecksum = tonChecksum & 0x8000 != 0 ? (tonChecksum << 1) ^ 0x1021 : tonChecksum << 1
+    }
+}
+assert(tonChecksum != (UInt16(addressBytes[34]) << 8 | UInt16(addressBytes[35])), "Visual addresses must be invalid on TON")
 let externalMoney = VisualGramLocalAppearance()
 assert(externalMoney.topUpLocalGrams(accountId: a, amount: 200, now: 1))
 assert(externalMoney.transferLocalGrams(accountId: a, toAddress: addressB, amount: 20, comment: nil, now: 2, transferId: "peer") == .sent)
@@ -243,7 +259,49 @@ assert(savedMoney.gramHistory?.last?.comment == "test")
 let oldGramEntry = #"{"id":"old","date":1,"amount":100,"kind":"topUp"}"#.data(using: .utf8)!
 assert(try! JSONDecoder().decode(VisualGramGift.StarsTransaction.self, from: oldGramEntry).comment == nil)
 
-print("PASS: GRAM precision, overflow, local transfers, paired history, strict quote currency, stale/insufficient balance, persistence; craft consumption, retained history, unlock date, owner and replay guards")
+let historyStore = VisualGramLocalAppearance()
+assert(historyStore.topUpLocalGrams(accountId: a, amount: 200, now: 1))
+assert(historyStore.transferLocalGrams(accountId: a, to: b, amount: 25, comment: "Original", now: 2, transferId: "history-transfer") == .sent)
+var history = historyStore.appearance(accountId: a)
+let initialOrder = VisualGramBalanceHistory.grams.displayedEntries(in: history, editorOrder: true).map(\.id)
+assert(initialOrder.count == 2 && initialOrder[0] == "history-transfer")
+assert(historyStore.saveBalanceHistoryOrder(target: a, currency: .grams, ids: Array(initialOrder.reversed())))
+assert(!historyStore.saveBalanceHistoryOrder(target: a, currency: .grams, ids: ["history-transfer"]))
+assert(historyStore.editBalanceHistoryEntry(target: a, currency: .grams, id: "history-transfer", edit: .init(amount: -50, date: 3, comment: "Edited")))
+assert(!historyStore.editBalanceHistoryEntry(target: a, currency: .grams, id: "history-transfer", edit: .init(amount: 50, date: 3, comment: nil)))
+history = try! JSONDecoder().decode(VisualGramAppearance.self, from: JSONEncoder().encode(historyStore.appearance(accountId: a)))
+assert(VisualGramBalanceHistory.grams.displayedEntries(in: history, editorOrder: true).map(\.id) == Array(initialOrder.reversed()))
+let displayedTransfer = VisualGramBalanceHistory.grams.displayedEntries(in: history).first
+assert(displayedTransfer?.amount == -50 && displayedTransfer?.date == 3 && displayedTransfer?.comment == "Edited")
+assert(history.gramHistory?.last?.amount == -25 && historyStore.localGramBalance(accountId: a) == 175)
+assert(!historyStore.deleteBalanceHistoryEntry(target: a, currency: .stars, id: "history-transfer"))
+assert(historyStore.deleteBalanceHistoryEntry(target: a, currency: .grams, id: "history-transfer"))
+assert(VisualGramBalanceHistory.grams.displayedEntries(in: historyStore.appearance(accountId: a)).map(\.id) == [initialOrder[1]])
+assert(historyStore.appearance(accountId: a).gramHistory?.count == 2)
+assert(VisualGramBalanceHistory.grams.displayedEntries(in: historyStore.appearance(accountId: b)).first?.amount == 25)
+historyStore.update(accountId: a) { value in
+    value.stars = 125
+    value.starsHistory = [.init(id: "stars-entry", date: 1, amount: 125, kind: .topUp, title: nil, peerId: nil, gift: nil)]
+}
+assert(historyStore.editBalanceHistoryEntry(target: a, currency: .stars, id: "stars-entry", edit: .init(amount: 100, date: 4, comment: nil)))
+assert(VisualGramBalanceHistory.stars.displayedEntries(in: historyStore.appearance(accountId: a)).first?.amount == 100)
+assert(historyStore.deleteBalanceHistoryEntry(target: a, currency: .stars, id: "stars-entry"))
+assert(VisualGramBalanceHistory.stars.displayedEntries(in: historyStore.appearance(accountId: a)).isEmpty)
+assert(historyStore.appearance(accountId: a).stars == 125)
+
+var previewAccount = VisualGramAppearance(enabled: true)
+var previewGift = first
+previewGift.counterpartyId = 30
+previewAccount.gifts = [previewGift]
+previewAccount.gramHistory = historyStore.appearance(accountId: a).gramHistory
+previewAccount.premiumGifts = [.init(id: "premium-preview", recipientId: 40, date: 10, months: 3, stars: 100, text: "", entities: [])]
+previewGift.counterpartyId = a.toInt64()
+let remoteProfile = VisualGramAppearance(enabled: true, gifts: [previewGift])
+let disabledProfile = VisualGramAppearance(enabled: false, gifts: [previewGift])
+let previewPeers = visualGramChatPreviewPeerIds(accountId: a, profiles: ["10": previewAccount, "50": remoteProfile, "60": disabledProfile])
+assert(previewPeers == Set([20, 30, 40, 50].map { EnginePeer.Id($0) }))
+
+print("PASS: GRAM precision, overflow, local transfers, editable balance history, strict quote currency, stale/insufficient balance, persistence; craft consumption, retained history, unlock date, owner and replay guards")
 '''
 
 

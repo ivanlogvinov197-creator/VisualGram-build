@@ -19,20 +19,24 @@ def apply_money(root, project):
     replace(shared, 'import WalletReceiveScreen\n', 'import WalletReceiveScreen\nimport WalletSendScreen\n')
     for suffix in ('', ', isOwnWallet: isOwnWallet', ', appeared: appeared'):
         replace(shared, 'return WalletReceiveScreen(context: context, address: address' + suffix + ')',
-                'return WalletReceiveScreen(context: context, address: address' + suffix + ', visualTopUp: VisualGramLocalAppearance.visualWalletPeer(address: address) == context.account.peerId ? { controller in\n            presentGramTopUp(on: controller, context: context, data: context.sharedContext.currentPresentationData.with { $0 })\n        } : nil)')
+                'return WalletReceiveScreen(context: context, address: address' + suffix + ', visualGram: VisualGramLocalAppearance.visualWalletPeer(address: address) != nil)')
     receive = ui / "Components/Wallet/WalletReceiveScreen/Sources/WalletReceiveScreen.swift"
-    replace(receive, '        return State(context: self.context, isOwnWallet: self.isOwnWallet)', '        return State(context: self.context, isOwnWallet: self.isOwnWallet && self.visualTopUp == nil)')
-    replace(receive, '    init(context: AccountContext, address: String, isOwnWallet: Bool) {', '    let visualTopUp: ((ViewController) -> Void)?\n\n    init(context: AccountContext, address: String, isOwnWallet: Bool, visualTopUp: ((ViewController) -> Void)?) {\n        self.visualTopUp = visualTopUp')
-    replace(receive, 'public init(context: AccountContext, address: String, isOwnWallet: Bool = true, appeared: (() -> Void)? = nil) {', 'public init(context: AccountContext, address: String, isOwnWallet: Bool = true, appeared: (() -> Void)? = nil, visualTopUp: ((ViewController) -> Void)? = nil) {')
-    replace(receive, 'component: WalletReceiveSheetComponent(context: context, address: address, isOwnWallet: isOwnWallet),', 'component: WalletReceiveSheetComponent(context: context, address: address, isOwnWallet: isOwnWallet, visualTopUp: visualTopUp),')
-    replace(receive, '                        buy: { [weak componentState] in\n                            guard isOwnWallet else { return }', """                        buy: { [weak componentState, visualTopUp = context.component.visualTopUp] in
-                            guard isOwnWallet else { return }
-                            if let visualTopUp, let controller = controller() {
-                                visualTopUp(controller)
-                                return
-                            }
-""".rstrip())
-    replace(receive, r'                        string: "ton://transfer/\(component.address)",', r'                        string: component.address.hasPrefix("dg") ? component.address : "ton://transfer/\(component.address)",')
+    replace(receive, '    let isPurchaseInProgress: Bool\n', '    let visualGram: Bool\n    let isPurchaseInProgress: Bool\n')
+    replace(receive, '        isPurchaseInProgress: Bool,\n', '        visualGram: Bool,\n        isPurchaseInProgress: Bool,\n')
+    replace(receive, '        self.isPurchaseInProgress = isPurchaseInProgress', '        self.visualGram = visualGram\n        self.isPurchaseInProgress = isPurchaseInProgress')
+    replace(receive, '        if lhs.isPurchaseInProgress != rhs.isPurchaseInProgress {', '        if lhs.visualGram != rhs.visualGram || lhs.isPurchaseInProgress != rhs.isPurchaseInProgress {')
+    replace(receive, '                        isEnabled: !component.isPurchaseInProgress,', '                        isEnabled: !component.visualGram && !component.isPurchaseInProgress,')
+    replace(receive, '        return State(context: self.context, isOwnWallet: self.isOwnWallet)', '        return State(context: self.context, isOwnWallet: self.isOwnWallet && !self.visualGram)')
+    replace(receive, '    init(context: AccountContext, address: String, isOwnWallet: Bool) {', '    let visualGram: Bool\n\n    init(context: AccountContext, address: String, isOwnWallet: Bool, visualGram: Bool) {\n        self.visualGram = visualGram')
+    replace(receive, '        if lhs.isOwnWallet != rhs.isOwnWallet {', '        if lhs.isOwnWallet != rhs.isOwnWallet || lhs.visualGram != rhs.visualGram {', expected=2)
+    replace(receive, 'public init(context: AccountContext, address: String, isOwnWallet: Bool = true, appeared: (() -> Void)? = nil) {', 'public init(context: AccountContext, address: String, isOwnWallet: Bool = true, appeared: (() -> Void)? = nil, visualGram: Bool = false) {')
+    replace(receive, 'component: WalletReceiveSheetComponent(context: context, address: address, isOwnWallet: isOwnWallet),', 'component: WalletReceiveSheetComponent(context: context, address: address, isOwnWallet: isOwnWallet, visualGram: visualGram),')
+    replace(receive, '                        isPurchaseInProgress: componentState.isPurchaseInProgress,', '                        visualGram: context.component.visualGram,\n                        isPurchaseInProgress: componentState.isPurchaseInProgress,')
+    replace(receive, '                        buy: { [weak componentState] in\n                            guard isOwnWallet else { return }', '                        buy: { [weak componentState, visualGram = context.component.visualGram] in\n                            guard isOwnWallet && !visualGram else { return }')
+    replace(receive, """                        component: AnyComponent(WalletReceiveQrComponent(
+                            address: component.address,""", r"""                        component: AnyComponent(WalletReceiveQrComponent(
+                            address: component.visualGram ? component.address : "ton://transfer/\(component.address)",""")
+    replace(receive, r'                        string: "ton://transfer/\(component.address)",', '                        string: component.address,')
 
     attachment = ui / "Sources/ChatControllerOpenAttachmentMenu.swift"
     replace(attachment, '            switch subject {\n            case .default, .gift:\n                if WalletConfiguration', '''            let hasLocalMoney = VisualGramLocalAppearance.shared.localGramBalance(accountId: self.context.account.peerId) != nil
@@ -96,9 +100,28 @@ def apply_money(root, project):
     replace(attachment, '                if inputIsActive {\n                    Queue.mainQueue().after(0.15, {\n                        present()', '                strongSelf.attachmentController = attachmentController\n                if inputIsActive {\n                    Queue.mainQueue().after(0.15, {\n                        present()')
 
     entries = ui / "Sources/ChatHistoryEntriesForView.swift"
+    replace(entries, '    associatedData: ChatMessageItemAssociatedData,\n', '    associatedData: ChatMessageItemAssociatedData,\n    visualGramPeer: EnginePeer?,\n')
+    replace(entries, '    if subject == nil, case let .peer(peerId) = location, let chatPeer, chatPeer.id == peerId {', '''    if includeEmptyEntry, subject == nil, case let .peer(peerId) = location,
+       let localPeer = visualGramPeer ?? chatPeer.flatMap(EnginePeer.init), localPeer.id == peerId {''')
+    replace(entries, '            peer: EnginePeer(chatPeer),\n            accountPeer: accountPeer,', '            peer: localPeer,\n            accountPeer: accountPeer,')
     replace(entries, '        if !messages.isEmpty {\n            entries.append(contentsOf: messages.map {', '        if !messages.isEmpty {\n            if view.entries.isEmpty {\n                entries.removeAll { entry in\n                    if case .ChatInfoEntry = entry { return true }\n                    return false\n                }\n            }\n            entries.append(contentsOf: messages.map {')
 
     history = ui / "Sources/ChatHistoryListNode.swift"
+    replace(history, '        let accountCountry: Signal<String?, NoError>\n', '''        let visualGramChatPeer: Signal<EnginePeer?, NoError>
+        if subject == nil, tag == nil, mode == .bubbles, case let .peer(peerId) = chatLocation,
+           peerId.namespace == Namespaces.Peer.CloudUser {
+            visualGramChatPeer = context.engine.data.subscribe(TelegramEngine.EngineData.Item.Peer.Peer(id: peerId))
+            |> distinctUntilChanged
+        } else {
+            visualGramChatPeer = .single(nil)
+        }
+        let accountAndChatPeer = combineLatest(accountPeer, visualGramChatPeer)
+
+        let accountCountry: Signal<String?, NoError>
+''')
+    replace(history, '            accountPeer |> debug_measureTimeToFirstEvent(label: "chatHistoryNode_accountPeer"),', '            accountAndChatPeer |> debug_measureTimeToFirstEvent(label: "chatHistoryNode_accountPeer"),')
+    replace(history, 'defaultReaction, accountPeer, accountCountry, suggestAudioTranscription, promises, topicAuthorId, translationState, maxReadStoryId, recommendedChannels, audioTranscriptionTrial, chatThemes, deviceContactsNumbers, contentSettings in\n', 'defaultReaction, accountAndChatPeer, accountCountry, suggestAudioTranscription, promises, topicAuthorId, translationState, maxReadStoryId, recommendedChannels, audioTranscriptionTrial, chatThemes, deviceContactsNumbers, contentSettings in\n            let (accountPeer, visualGramPeer) = accountAndChatPeer\n')
+    replace(history, '                    associatedData: associatedData,\n                    updatingMedia: updatingMedia,', '                    associatedData: associatedData,\n                    visualGramPeer: visualGramPeer,\n                    updatingMedia: updatingMedia,')
     replace(history, 'let isEmpty = transition.historyView.originalView.entries.isEmpty || loadState == .empty(.botInfo)', 'let isEmpty = loadState == .empty(.botInfo) || (transition.historyView.originalView.entries.isEmpty && !transition.historyView.filteredEntries.contains { entry in\n                if case let .MessageEntry(message, _, _, _, _, _) = entry { return message.id.namespace == Int32.max - 42 }\n                return false\n            })', expected=2)
 
     root_controller = ui / "Sources/TelegramRootController.swift"
@@ -246,6 +269,115 @@ extension PeerInfoScreenNode {
     list_item = preview.with_name("ChatListItem.swift")
     replace(list_item, '                let hasUnreadIncomingGramTransfer = messages.last.map { message in\n',
             '                let hasUnreadIncomingGramTransfer = messages.last.map { message in\n                    guard message.id.namespace != Int32.max - 42 else { return false }\n')
+
+    list_node = preview.with_name("ChatListNode.swift")
+    replace(list_node, '        let chatListNodeViewTransition = combineLatest(queue: viewProcessingQueue,\n', '''        let localPreviews: Signal<[EnginePeer.Id: VisualGramChatListPreview], NoError>
+        if case .chatList = mode, case .chatList = location {
+            localPreviews = VisualGramLocalAppearance.shared.changes
+            |> mapToSignal { _ -> Signal<[EnginePeer.Id: VisualGramChatListPreview], NoError> in
+                let ids = visualGramChatPreviewPeerIds(accountId: accountPeerId)
+                guard !ids.isEmpty else { return .single([:]) }
+                return context.engine.data.subscribe(
+                    EngineDataMap(ids.map(TelegramEngine.EngineData.Item.Peer.Peer.init)),
+                    EngineDataMap(ids.map(TelegramEngine.EngineData.Item.Messages.ChatListIndex.init)),
+                    EngineDataMap(ids.map(TelegramEngine.EngineData.Item.Messages.ChatListGroup.init)),
+                    TelegramEngine.EngineData.Item.Peer.Peer(id: accountPeerId)
+                )
+                |> map { peers, indices, groups, accountPeer in
+                    let now = Int32(clamping: Int64(Date().timeIntervalSince1970))
+                    var result: [EnginePeer.Id: VisualGramChatListPreview] = [:]
+                    for (id, peer) in peers {
+                        guard let peer, let message = visualGramChatGiftMessages(
+                            accountPeerId: accountPeerId, peer: peer, accountPeer: accountPeer,
+                            fromTimestamp: nil, throughTimestamp: now
+                        ).max(by: { $0.index < $1.index }) else { continue }
+                        result[id] = VisualGramChatListPreview(peer: peer, message: message,
+                            hasChatListIndex: (indices[id] ?? nil) != nil, group: groups[id] ?? nil)
+                    }
+                    return result
+                }
+            }
+        } else {
+            localPreviews = .single([:])
+        }
+        let chatListAndPreviews = combineLatest(chatListViewUpdate, localPreviews)
+        let chatListNodeViewTransition = combineLatest(queue: viewProcessingQueue,
+''')
+    replace(list_node, '            chatListViewUpdate,\n            self.statePromise.get(),', '            chatListAndPreviews,\n            self.statePromise.get(),')
+    replace(list_node, 'contacts, chatListFilters, accountIsPremiumAndPeer: ChatListNodeAccountPeerState) -> Signal<ChatListNodeListViewTransition, NoError> in\n            let (update, filter) = updateAndFilter', 'contacts, chatListFilters, accountIsPremiumAndPeer: ChatListNodeAccountPeerState) -> Signal<ChatListNodeListViewTransition, NoError> in\n            let ((update, filter), localPreviews) = updateAndFilter')
+    replace(list_node, 'accountPeerId: accountPeerId, isMainTab: innerIsMainTab)\n', 'accountPeerId: accountPeerId, isMainTab: innerIsMainTab, localPreviews: localPreviews, includeLocalOnlyChats: (filter == nil || filter == .allChats) && location == .chatList(groupId: .root) && !isSideList)\n')
+
+    list_entries = preview.with_name("ChatListNodeEntries.swift")
+    replace(list_entries, 'func chatListNodeEntriesForView(', '''struct VisualGramChatListPreview {
+    let peer: EnginePeer
+    let message: EngineMessage
+    let hasChatListIndex: Bool
+    let group: EngineChatList.Group?
+}
+
+func chatListNodeEntriesForView(''')
+    replace(list_entries, 'accountPeerId: EnginePeer.Id, isMainTab: Bool) -> (entries:', 'accountPeerId: EnginePeer.Id, isMainTab: Bool, localPreviews: [EnginePeer.Id: VisualGramChatListPreview], includeLocalOnlyChats: Bool) -> (entries:')
+    replace(list_entries, '    var hasContacts = false\n', '''    var visibleLocalOnlyChats: [VisualGramChatListPreview] = []
+    if includeLocalOnlyChats {
+        let existing = Set(view.items.map { $0.renderedPeer.peerId } + view.additionalItems.map { $0.item.renderedPeer.peerId })
+        let unpinned = view.items.compactMap { item -> EngineChatList.Item.Index? in
+            guard case let .chatList(index) = item.index, index.pinningIndex == nil else { return nil }
+            return item.index
+        }
+        let lowerBound = view.hasEarlier ? unpinned.first : nil
+        let upperBound = view.hasLater ? unpinned.last : nil
+        for (id, preview) in localPreviews {
+            let index = EngineChatList.Item.Index.chatList(.init(pinningIndex: nil, messageIndex: preview.message.index))
+            let itemId = ChatListNodeState.ItemId(peerId: id, threadId: nil)
+            guard !existing.contains(id), !preview.hasChatListIndex, preview.group != .archive,
+                  lowerBound.map({ $0 <= index }) ?? !view.hasEarlier,
+                  upperBound.map({ index <= $0 }) ?? !view.hasLater,
+                  !state.pendingRemovalItemIds.contains(itemId), !state.pendingClearHistoryPeerIds.contains(itemId) else { continue }
+            visibleLocalOnlyChats.append(preview)
+        }
+    }
+
+    var hasContacts = false
+''')
+    replace(list_entries, '        for contact in contacts {\n', '        existingPeerIds.formUnion(visibleLocalOnlyChats.map { $0.peer.id })\n        for contact in contacts {\n')
+    replace(list_entries, 'displayHide: !view.items.isEmpty))', 'displayHide: !view.items.isEmpty || !visibleLocalOnlyChats.isEmpty))')
+    replace(list_entries, '    var hasPinned = false\n', '    var hasPinned = false\n    var needsLocalSort = !visibleLocalOnlyChats.isEmpty\n')
+    replace(list_entries, '        var draftState: ChatListItemContent.DraftState?\n        if let draft = entry.draft {', '''        var displayIndex = entry.index
+        if case .chatList = mode, case .chatList = chatListLocation, case let .chatList(originalIndex) = entry.index,
+           let peerId, !state.pendingClearHistoryPeerIds.contains(.init(peerId: peerId, threadId: threadId)),
+           let preview = localPreviews[peerId],
+           updatedMessages.last.map({ $0.timestamp <= preview.message.timestamp }) ?? true {
+            updatedMessages = [preview.message]
+            if originalIndex.pinningIndex == nil, preview.message.timestamp >= originalIndex.messageIndex.timestamp {
+                displayIndex = .chatList(.init(pinningIndex: nil, messageIndex: preview.message.index))
+                needsLocalSort = true
+            }
+        }
+
+        var draftState: ChatListItemContent.DraftState?
+        if let draft = entry.draft {''')
+    replace(list_entries, '            index: offsetPinnedIndex(entry.index, offset: pinnedIndexOffset),', '            index: offsetPinnedIndex(displayIndex, offset: pinnedIndexOffset),')
+    replace(list_entries, '    if let hiddenGeneralThread {\n', '''    for preview in visibleLocalOnlyChats {
+        let id = preview.peer.id
+        result.append(.PeerEntry(.init(
+            index: .chatList(.init(pinningIndex: nil, messageIndex: preview.message.index)),
+            presentationData: state.presentationData, messages: [preview.message], readState: nil,
+            isRemovedFromTotalUnreadCount: false, draftState: nil, mediaDraftContentType: nil,
+            peer: EngineRenderedPeer(peerId: id, peers: [id: preview.peer], associatedMedia: [:]), threadInfo: nil,
+            presence: nil, hasUnseenMentions: false, hasUnseenReactions: false, hasUnseenPollVotes: false,
+            editing: state.editing, hasActiveRevealControls: state.peerIdWithRevealedOptions == .init(peerId: id, threadId: nil),
+            selected: state.selectedPeerIds.contains(id),
+            inputActivities: state.peerInputActivities?.activities[.init(peerId: id, threadId: nil)],
+            promoInfo: nil, hasFailedMessages: false, isContact: false, autoremoveTimeout: nil,
+            forumTopicData: nil, topForumTopicItems: [], revealed: false, storyState: nil,
+            requiresPremiumForMessaging: false, displayAsTopicList: false
+        )))
+    }
+    if needsLocalSort {
+        result.sort()
+    }
+    if let hiddenGeneralThread {
+''')
 
     animation = ui / "Sources/ChatWalletTransferAnimation.swift"
     replace(animation, '            let matches: Bool\n', '''            if message.id.namespace == Int32.max - 42 {

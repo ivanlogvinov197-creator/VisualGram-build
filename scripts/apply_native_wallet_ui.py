@@ -124,6 +124,7 @@ def apply_wallet_dashboard(ui):
     replace(screen, "                opensCollectibles: opensCollectibles\n", "                opensCollectibles: opensCollectibles,\n                visualGram: visualGram\n")
     replace(screen, "        if self.walletScreenUpdatesDisposable == nil {", "        if !self.visualGram && self.walletScreenUpdatesDisposable == nil {")
     replace(screen, "        componentView.refreshTwoStepAuth()\n        componentView.reloadPreviousWallets()", "        if !self.visualGram {\n            componentView.refreshTwoStepAuth()\n            componentView.reloadPreviousWallets()\n        }")
+    replace(screen, "                self.walletState = nil\n", "                self.walletState = component.visualGram ? initialVisualGramWalletState(context: component.context) : nil\n")
     replace(screen, "                self.walletStateDisposable = (subscribedContext.state", """                let walletState = component.visualGram ? visualGramWalletState(context: component.context) : subscribedContext.state
                 self.walletStateDisposable = (walletState""")
     replace(screen, "                    if previousPhase != walletState.phase || previousWalletAddress != walletState.walletAddress {", "                    if !component.visualGram && (previousPhase != walletState.phase || previousWalletAddress != walletState.walletAddress) {")
@@ -251,6 +252,58 @@ def apply_wallet_dashboard(ui):
     replace(transaction, "                    willDismiss: {\n                        (controller() as? ViewControllerComponentContainer)?.requestLayout(", """                    willDismiss: {
                         guard !context.component.transaction.id.hasPrefix("duckgram:") else { return }
                         (controller() as? ViewControllerComponentContainer)?.requestLayout(""")
+    replace(transaction, """                    hasDimView: context.component.hasDimView,
+                    autoAnimateOut: false,
+                    externalState: sheetExternalState,
+                    animateOut: animateOut,
+                    onPan: {""", """                    hasDimView: context.component.hasDimView,
+                    autoAnimateOut: false,
+                    locksScrollOffsetOnDismiss: context.component.transaction.id.hasPrefix("duckgram:"),
+                    externalState: sheetExternalState,
+                    animateOut: animateOut,
+                    onPan: {""")
+
+    sheet = ui.parent / "Components/SheetComponent/Sources/SheetComponent.swift"
+    replace(sheet, "    public let autoAnimateOut: Bool\n", "    public let autoAnimateOut: Bool\n    public let locksScrollOffsetOnDismiss: Bool\n")
+    replace(sheet, "        autoAnimateOut: Bool = true,\n", "        autoAnimateOut: Bool = true,\n        locksScrollOffsetOnDismiss: Bool = false,\n")
+    replace(sheet, "        self.autoAnimateOut = autoAnimateOut\n", "        self.autoAnimateOut = autoAnimateOut\n        self.locksScrollOffsetOnDismiss = locksScrollOffsetOnDismiss\n")
+    replace(sheet, "        if lhs.autoAnimateOut != rhs.autoAnimateOut {", "        if lhs.autoAnimateOut != rhs.autoAnimateOut || lhs.locksScrollOffsetOnDismiss != rhs.locksScrollOffsetOnDismiss {")
+    replace(sheet, "            let currentContentOffset = scrollView.contentOffset\n", """            let currentContentOffset = scrollView.contentOffset
+            if self.lockedDismissalBounds != nil {
+                targetContentOffset.pointee = currentContentOffset
+                return
+            }
+""")
+    replace(sheet, "        private var ignoreScrolling: Bool = false\n", "        private var ignoreScrolling: Bool = false\n        private var lockedDismissalBounds: CGRect?\n")
+    replace(sheet, """            guard !self.ignoreScrolling else {
+                return
+            }
+            let contentOffset""", """            guard !self.ignoreScrolling else {
+                return
+            }
+            if let bounds = self.lockedDismissalBounds {
+                if scrollView.bounds != bounds {
+                    self.ignoreScrolling = true
+                    scrollView.bounds = bounds
+                    self.ignoreScrolling = false
+                }
+                return
+            }
+            let contentOffset""")
+    replace(sheet, "            if contentOffset >= scrollView.contentSize.height {\n", "            if self.component?.locksScrollOffsetOnDismiss != true && contentOffset >= scrollView.contentSize.height {\n")
+    replace(sheet, "            self.isAnimatingOut = true\n", """            self.isAnimatingOut = true
+            if self.component?.locksScrollOffsetOnDismiss == true {
+                // Freeze the drag position before UIKit can rebound to its resting offset.
+                let bounds = self.scrollView.bounds
+                self.lockedDismissalBounds = bounds
+                self.scrollView.isScrollEnabled = false
+                self.scrollView.layer.removeAnimation(forKey: "bounds")
+                self.scrollView.bounds = bounds
+            }
+""")
+    replace(sheet, "                var targetPosition = self.scrollView.center.y + delta + 6.0", """                let distance = self.lockedDismissalBounds == nil ? delta : max(0.0, delta)
+                var targetPosition = self.scrollView.center.y + distance + 6.0""")
+    replace(sheet, "y: targetPosition), completion: { _ in", "y: targetPosition), beginFromCurrentState: self.lockedDismissalBounds != nil, completion: { _ in")
 
     history_item = wallet / "WalletTransactionItemComponent/Sources/WalletTransactionItemComponent.swift"
     replace(history_item, "            if !isServiceTransaction, let peer = transaction.peer.peer {", """            if transaction.id.hasPrefix("duckgram:purchase:") {

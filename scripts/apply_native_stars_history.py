@@ -69,7 +69,8 @@ def apply_stars_history(root, project):
     replace(screen, '                self.stateDisposable = (component.starsContext.state\n', '                self.stateDisposable = (combineLatest(component.starsContext.state, VisualGramLocalAppearance.shared.changes) |> map { state, _ in state }\n')
     replace(screen, '            let initialTransactions = self.starsState?.transactions ?? []\n', '''            let localWallet = VisualGramLocalAppearance.shared.appearance(accountId: component.context.account.peerId)
             let showLocalHistory = localWallet.enabled && (component.starsContext.ton ? localWallet.grams : localWallet.stars) != nil && component.starsContext.peerId == component.context.account.peerId
-            let hasTransactions = showLocalHistory ? !((component.starsContext.ton ? localWallet.gramHistory : localWallet.starsHistory) ?? []).isEmpty : !(self.starsState?.transactions ?? []).isEmpty
+            let historyCurrency: VisualGramBalanceHistory = component.starsContext.ton ? .grams : .stars
+            let hasTransactions = showLocalHistory ? !historyCurrency.displayedEntries(in: localWallet).isEmpty : !(self.starsState?.transactions ?? []).isEmpty
 ''')
     replace(screen, '            if !initialTransactions.isEmpty {\n', '            if hasTransactions {\n')
 
