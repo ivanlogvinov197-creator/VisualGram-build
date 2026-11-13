@@ -206,6 +206,18 @@ assert(resetCard.gramCardGiftIds == [] && resetCard.gramCardBackgroundId == nil 
 var secondCopy = first; secondCopy.localIdentifier = "another-copy"
 assert(VisualGramLocalAppearance.cardStickerAddress(first) != VisualGramLocalAppearance.cardStickerAddress(secondCopy), "two local copies shared sticker hit-test identity")
 
+let addressA = VisualGramLocalAppearance.visualWalletAddress(peerId: a)
+let addressB = VisualGramLocalAppearance.visualWalletAddress(peerId: b)
+assert(addressA != addressB && addressA.allSatisfy(\.isLetter))
+assert(VisualGramLocalAppearance.visualWalletPeer(address: addressB) == b)
+assert(VisualGramLocalAppearance.visualWalletPeer(address: "dg!") == nil)
+let externalMoney = VisualGramLocalAppearance()
+assert(externalMoney.topUpLocalGrams(accountId: a, amount: 200, now: 1))
+assert(externalMoney.transferLocalGrams(accountId: a, toAddress: addressB, amount: 20, comment: nil, now: 2, transferId: "peer") == .sent)
+assert(externalMoney.transferLocalGrams(accountId: a, toAddress: "wallet-address", amount: 10, comment: nil, now: 3, transferId: "external") == .sent)
+assert(externalMoney.localGramBalance(accountId: a) == 170 && externalMoney.localGramBalance(accountId: b) == 20)
+assert(externalMoney.appearance(accountId: a).gramHistory?.last?.walletAddress == "wallet-address")
+assert(externalMoney.transferLocalGrams(accountId: a, toAddress: addressA, amount: 10, comment: nil, now: 4, transferId: "self") == .invalidRecipient)
 let money = VisualGramLocalAppearance()
 assert(money.localGramBalance(accountId: a) == nil)
 assert(money.topUpLocalGrams(accountId: a, amount: 1_000_000_001, now: 1))

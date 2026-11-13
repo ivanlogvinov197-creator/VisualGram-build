@@ -16,6 +16,24 @@ def apply_money(root, project):
             '            opensCollectibles: opensCollectibles,\n            visualGram: VisualGramLocalAppearance.shared.localGramBalance(accountId: context.account.peerId) != nil\n')
 
     replace(shared, 'WalletTransactionScreen(context: context, transaction: transaction, fromChat: fromChat, decryptCommentOnOpen:', 'WalletTransactionScreen(context: context, transaction: transaction, fromChat: fromChat, visualGram: transaction.id.hasPrefix("duckgram:"), decryptCommentOnOpen:')
+    replace(shared, 'import WalletReceiveScreen\n', 'import WalletReceiveScreen\nimport WalletSendScreen\n')
+    for suffix in ('', ', isOwnWallet: isOwnWallet', ', appeared: appeared'):
+        replace(shared, 'return WalletReceiveScreen(context: context, address: address' + suffix + ')',
+                'return WalletReceiveScreen(context: context, address: address' + suffix + ', visualTopUp: VisualGramLocalAppearance.visualWalletPeer(address: address) == context.account.peerId ? { controller in\n            presentGramTopUp(on: controller, context: context, data: context.sharedContext.currentPresentationData.with { $0 })\n        } : nil)')
+    receive = ui / "Components/Wallet/WalletReceiveScreen/Sources/WalletReceiveScreen.swift"
+    replace(receive, '        return State(context: self.context, isOwnWallet: self.isOwnWallet)', '        return State(context: self.context, isOwnWallet: self.isOwnWallet && self.visualTopUp == nil)')
+    replace(receive, '    init(context: AccountContext, address: String, isOwnWallet: Bool) {', '    let visualTopUp: ((ViewController) -> Void)?\n\n    init(context: AccountContext, address: String, isOwnWallet: Bool, visualTopUp: ((ViewController) -> Void)?) {\n        self.visualTopUp = visualTopUp')
+    replace(receive, 'public init(context: AccountContext, address: String, isOwnWallet: Bool = true, appeared: (() -> Void)? = nil) {', 'public init(context: AccountContext, address: String, isOwnWallet: Bool = true, appeared: (() -> Void)? = nil, visualTopUp: ((ViewController) -> Void)? = nil) {')
+    replace(receive, 'component: WalletReceiveSheetComponent(context: context, address: address, isOwnWallet: isOwnWallet),', 'component: WalletReceiveSheetComponent(context: context, address: address, isOwnWallet: isOwnWallet, visualTopUp: visualTopUp),')
+    replace(receive, '                        buy: { [weak componentState] in\n                            guard isOwnWallet else { return }', """                        buy: { [weak componentState, visualTopUp = context.component.visualTopUp] in
+                            guard isOwnWallet else { return }
+                            if let visualTopUp, let controller = controller() {
+                                visualTopUp(controller)
+                                return
+                            }
+""".rstrip())
+    replace(receive, r'                        string: "ton://transfer/\(component.address)",', r'                        string: component.address.hasPrefix("dg") ? component.address : "ton://transfer/\(component.address)",')
+
     attachment = ui / "Sources/ChatControllerOpenAttachmentMenu.swift"
     replace(attachment, '            switch subject {\n            case .default, .gift:\n                if WalletConfiguration', '''            let hasLocalMoney = VisualGramLocalAppearance.shared.localGramBalance(accountId: self.context.account.peerId) != nil
             switch subject {
@@ -26,6 +44,84 @@ def apply_money(root, project):
 
     replace(attachment, 'walletTransferAnimationCoordinator().receive(id: id, source: source)', 'walletTransferAnimationCoordinator().receive(id: id, source: source, visualGram: hasLocalMoney)')
     replace(attachment, 'walletTransferAnimationCoordinator().prepare(id: id)', 'walletTransferAnimationCoordinator().prepare(id: id, visualGram: hasLocalMoney)')
+
+    # Keep the stock glass animation, with the stock slide-in for an unavailable source.
+    attachment_ui = root / "submodules/AttachmentUI/Sources/AttachmentController.swift"
+    replace(attachment_ui, '        func animateIn() {\n', """        private func validAttachmentMorphFrame(_ frame: CGRect) -> Bool {
+            return frame.origin.x.isFinite && frame.origin.y.isFinite
+                && frame.width.isFinite && frame.height.isFinite
+                && frame.width >= 1.0 && frame.height >= 1.0
+        }
+
+        private func attachmentMorphFrame(for button: UIView) -> CGRect? {
+            let frame = button.convert(button.bounds, to: self.view)
+            return self.validAttachmentMorphFrame(frame) ? frame : nil
+        }
+
+        func animateIn() {
+""")
+    replace(attachment_ui, '                if case .glass = controller.style, let attachmentButton = controller.attachmentButton {\n', """                let targetFrame = self.container.clipNode.view.convert(self.container.clipNode.view.bounds, to: self.view)
+                if case .glass = controller.style, let attachmentButton = controller.attachmentButton,
+                   let window = self.view.window, attachmentButton.window === window,
+                   let sourceGlassView = findParentGlassBackgroundView(attachmentButton), let glassParams = sourceGlassView.params,
+                   self.validAttachmentMorphFrame(targetFrame),
+                   let sourceButtonFrame = self.attachmentMorphFrame(for: attachmentButton) {
+""")
+    source_text = attachment_ui.read_text(encoding="utf-8")
+    start = source_text.index('                    let targetFrame =', source_text.index('        func animateIn()'))
+    end = source_text.index('                } else {\n                    let targetPosition', start)
+    original_morph = source_text[start:end]
+    morph_body = original_morph.split('let glassParams = sourceGlassView.params {\n', 1)[1].rsplit('                    }\n', 1)[0]
+    morph_body = '\n'.join(line[4:] if line.startswith('    ') else line for line in morph_body.split('\n'))
+    replace(attachment_ui, original_morph, '                    let sourceButtonScale = sourceButtonFrame.width / targetFrame.width\n\n' + morph_body)
+    replace(attachment_ui, '                if case .glass = controller.style, let attachmentButton = controller.attachmentButton, let sourceGlassView = appearanceTransition?.sourceGlassView ?? findParentGlassBackgroundView(attachmentButton), let glassParams = sourceGlassView.params {', """                let initialFrame = appearanceTransition?.targetFrame ?? self.container.clipNode.view.convert(self.container.clipNode.view.bounds, to: self.view)
+                if case .glass = controller.style, let attachmentButton = controller.attachmentButton,
+                   let window = self.view.window, attachmentButton.window === window,
+                   let sourceGlassView = appearanceTransition?.sourceGlassView ?? findParentGlassBackgroundView(attachmentButton),
+                   let glassParams = sourceGlassView.params, self.validAttachmentMorphFrame(initialFrame),
+                   let targetButtonFrame = self.attachmentMorphFrame(for: attachmentButton) {""")
+    replace(attachment_ui, """                    let initialFrame = appearanceTransition?.targetFrame ?? self.container.clipNode.view.convert(self.container.clipNode.view.bounds, to: self.view)
+
+                    let targetButtonFrame = attachmentButton.convert(attachmentButton.bounds, to: self.view)
+""", '')
+    replace(attachment, '                var (buttons, allButtons, initialButton) = buttonsAndInitialButton\n', '                guard strongSelf.attachmentController == nil else { return }\n                var (buttons, allButtons, initialButton) = buttonsAndInitialButton\n')
+    replace(attachment, '                    if !premiumGiftOptions.isEmpty {\n                        buttons.insert(.gift, at: 1)\n', '                    if !premiumGiftOptions.isEmpty && !buttons.contains(.gift) {\n                        buttons.insert(.gift, at: min(1, buttons.count))\n')
+    replace(attachment, '                    buttons.insert(.richText, at: firstBotIndex)\n', '                    if !buttons.contains(.richText) {\n                        buttons.insert(.richText, at: firstBotIndex)\n                    }\n')
+    replace(attachment, '                let present = {\n                    attachmentController.navigationPresentation', '                let present = {\n                    guard strongSelf.attachmentController === attachmentController else { return }\n                    guard strongSelf.viewIfLoaded?.window != nil else {\n                        strongSelf.attachmentController = nil\n                        strongSelf.canReadHistory.set(true)\n                        return\n                    }\n                    attachmentController.navigationPresentation')
+    replace(attachment, '                attachmentController.didDismiss = { [weak self] in\n                    self?.attachmentController = nil\n                    self?.canReadHistory.set(true)\n                }', """                attachmentController.didDismiss = { [weak self, weak attachmentController] in
+                    guard let self, self.attachmentController === attachmentController else { return }
+                    self.attachmentController = nil
+                    self.canReadHistory.set(true)
+                }""")
+    replace(attachment, '                if inputIsActive {\n                    Queue.mainQueue().after(0.15, {\n                        present()', '                strongSelf.attachmentController = attachmentController\n                if inputIsActive {\n                    Queue.mainQueue().after(0.15, {\n                        present()')
+
+    entries = ui / "Sources/ChatHistoryEntriesForView.swift"
+    replace(entries, '        if !messages.isEmpty {\n            entries.append(contentsOf: messages.map {', '        if !messages.isEmpty {\n            if view.entries.isEmpty {\n                entries.removeAll { entry in\n                    if case .ChatInfoEntry = entry { return true }\n                    return false\n                }\n            }\n            entries.append(contentsOf: messages.map {')
+
+    history = ui / "Sources/ChatHistoryListNode.swift"
+    replace(history, 'let isEmpty = transition.historyView.originalView.entries.isEmpty || loadState == .empty(.botInfo)', 'let isEmpty = loadState == .empty(.botInfo) || (transition.historyView.originalView.entries.isEmpty && !transition.historyView.filteredEntries.contains { entry in\n                if case let .MessageEntry(message, _, _, _, _, _) = entry { return message.id.namespace == Int32.max - 42 }\n                return false\n            })', expected=2)
+
+    root_controller = ui / "Sources/TelegramRootController.swift"
+    replace(root_controller, '        let newsController = NewsScreen(context: self.context)\n        \n        var controllers: [ViewController] = []', """        let newsController = NewsScreen(context: self.context)
+        let contactsController = ContactsController(context: self.context)
+        contactsController.isTab = true
+        self.contactsController = contactsController
+
+        var controllers: [ViewController] = [contactsController]""")
+    replace(root_controller, '        var controllers: [ViewController] = []\n        if showCallsTab {', '        var controllers: [ViewController] = []\n        if let contactsController = self.contactsController {\n            controllers.append(contactsController)\n        }\n        if showCallsTab {')
+    replace(root_controller, '        if let index = rootTabController.controllers.firstIndex(where: { $0 is PeerInfoScreenImpl }) {\n            rootTabController.selectedIndex = index\n        }\n        \n        let contactsController = ContactsController(context: self.context)\n        self.contactsController = contactsController\n        self.pushViewController(contactsController)', '        if let index = rootTabController.controllers.firstIndex(where: { $0 is ContactsController }) {\n            rootTabController.selectedIndex = index\n        }')
+    replace(root_controller, '    /// Contacts has no tab: the Settings tab, with the screen Settings ▸ Contacts pushes over it.\n', '')
+    contacts = root / "submodules/ContactListUI/Sources/ContactsController.swift"
+    replace(contacts, 'public class ContactsController: ViewController {\n', 'public class ContactsController: ViewController {\n    public var isTab = false\n')
+    replace(contacts, '        self.title = self.presentationData.strings.Contacts_Title\n', """        self.title = self.presentationData.strings.Contacts_Title
+        self.tabBarItem.title = self.title
+        let icon = UIImage(bundleImageName: "Chat List/Tabs/IconContacts")
+        self.tabBarItem.image = icon
+        self.tabBarItem.selectedImage = icon
+        self.tabBarItem.animationName = self.presentationData.reduceMotion ? nil : "TabContacts"
+""", expected=2)
+    contacts_node = root / "submodules/ContactListUI/Sources/ContactsControllerNode.swift"
+    replace(contacts_node, '        let backPressed: (() -> Void)? = { [weak self] in\n', '        let backPressed: (() -> Void)? = self.controller?.isTab == true ? nil : { [weak self] in\n')
 
     peer_info = ui / "Components/PeerInfo/PeerInfoScreen/Sources"
     menu = peer_info / "PeerInfoScreenPerformButtonAction.swift"
@@ -129,7 +225,7 @@ extension PeerInfoScreenNode {
                                     direction: incoming ? .incoming : .outgoing,
                                     amount: incoming ? amount : -amount,
                                     fee: 0,
-                                    peer: peer.map { .user($0, address: "", domain: nil) } ?? .unsupported,
+                                    peer: peer.map { .user($0, address: peerAddress.isEmpty ? VisualGramLocalAppearance.visualWalletAddress(peerId: $0.id) : peerAddress, domain: nil) } ?? .unsupported,
                                     comment: messageComment
                                 )
                                 self.push(self.context.sharedContext.makeWalletTransactionScreen(context: self.context, transaction: transaction, fromChat: true, decryptCommentOnOpen: false))
