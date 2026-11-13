@@ -11,7 +11,9 @@ def source():
     counter = (root / 'native/VisualGramTabTapCounter.swift').read_text(encoding='utf-8')
     renderer = (root / 'native/VisualGramStarsHistory.swift').read_text(encoding='utf-8')
     renderer = '\n'.join(line for line in renderer.splitlines() if not line.startswith('import '))
-    return STUBS + model + counter + renderer + CHECKS
+    wallet = (root / 'native/VisualGramWallet.swift').read_text(encoding='utf-8')
+    history = wallet[wallet.index('public enum VisualGramBalanceHistory:'):wallet.index('public extension VisualGramLocalAppearance')]
+    return STUBS + model + counter + history + renderer + CHECKS
 
 
 STUBS = r'''
@@ -35,7 +37,12 @@ public enum StarsContext { public enum State {
         }
     }
 } }
-public struct VisualGramAppearance { public var starsHistory: [VisualGramGift.StarsTransaction]?; public var gramHistory: [VisualGramGift.StarsTransaction]? }
+public struct VisualGramAppearance {
+    var starsHistory: [VisualGramGift.StarsTransaction]?
+    var gramHistory: [VisualGramGift.StarsTransaction]?
+    var starsHistoryOrder: [String]?
+    var gramHistoryOrder: [String]?
+}
 public final class VisualGramLocalAppearance {
     public var values: [Int64: VisualGramAppearance] = [:]
     public func appearance(accountId: EnginePeer.Id) -> VisualGramAppearance { values[accountId.toInt64()] ?? .init() }
