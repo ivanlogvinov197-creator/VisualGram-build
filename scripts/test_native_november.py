@@ -259,41 +259,41 @@ assert(savedMoney.gramHistory?.last?.comment == "test")
 let oldGramEntry = #"{"id":"old","date":1,"amount":100,"kind":"topUp"}"#.data(using: .utf8)!
 assert(try! JSONDecoder().decode(VisualGramGift.StarsTransaction.self, from: oldGramEntry).comment == nil)
 
-let historyStore = VisualGramLocalAppearance()
-assert(historyStore.topUpLocalGrams(accountId: a, amount: 200, now: 1))
-assert(historyStore.transferLocalGrams(accountId: a, to: b, amount: 25, comment: "Original", now: 2, transferId: "history-transfer") == .sent)
-var history = historyStore.appearance(accountId: a)
+let balanceHistoryStore = VisualGramLocalAppearance()
+assert(balanceHistoryStore.topUpLocalGrams(accountId: a, amount: 200, now: 1))
+assert(balanceHistoryStore.transferLocalGrams(accountId: a, to: b, amount: 25, comment: "Original", now: 2, transferId: "history-transfer") == .sent)
+var history = balanceHistoryStore.appearance(accountId: a)
 let initialOrder = VisualGramBalanceHistory.grams.displayedEntries(in: history, editorOrder: true).map(\.id)
 assert(initialOrder.count == 2 && initialOrder[0] == "history-transfer")
-assert(historyStore.saveBalanceHistoryOrder(target: a, currency: .grams, ids: Array(initialOrder.reversed())))
-assert(!historyStore.saveBalanceHistoryOrder(target: a, currency: .grams, ids: ["history-transfer"]))
-assert(historyStore.editBalanceHistoryEntry(target: a, currency: .grams, id: "history-transfer", edit: .init(amount: -50, date: 3, comment: "Edited")))
-assert(!historyStore.editBalanceHistoryEntry(target: a, currency: .grams, id: "history-transfer", edit: .init(amount: 50, date: 3, comment: nil)))
-history = try! JSONDecoder().decode(VisualGramAppearance.self, from: JSONEncoder().encode(historyStore.appearance(accountId: a)))
+assert(balanceHistoryStore.saveBalanceHistoryOrder(target: a, currency: .grams, ids: Array(initialOrder.reversed())))
+assert(!balanceHistoryStore.saveBalanceHistoryOrder(target: a, currency: .grams, ids: ["history-transfer"]))
+assert(balanceHistoryStore.editBalanceHistoryEntry(target: a, currency: .grams, id: "history-transfer", edit: .init(amount: -50, date: 3, comment: "Edited")))
+assert(!balanceHistoryStore.editBalanceHistoryEntry(target: a, currency: .grams, id: "history-transfer", edit: .init(amount: 50, date: 3, comment: nil)))
+history = try! JSONDecoder().decode(VisualGramAppearance.self, from: JSONEncoder().encode(balanceHistoryStore.appearance(accountId: a)))
 assert(VisualGramBalanceHistory.grams.displayedEntries(in: history, editorOrder: true).map(\.id) == Array(initialOrder.reversed()))
 let displayedTransfer = VisualGramBalanceHistory.grams.displayedEntries(in: history).first
 assert(displayedTransfer?.amount == -50 && displayedTransfer?.date == 3 && displayedTransfer?.comment == "Edited")
-assert(history.gramHistory?.last?.amount == -25 && historyStore.localGramBalance(accountId: a) == 175)
-assert(!historyStore.deleteBalanceHistoryEntry(target: a, currency: .stars, id: "history-transfer"))
-assert(historyStore.deleteBalanceHistoryEntry(target: a, currency: .grams, id: "history-transfer"))
-assert(VisualGramBalanceHistory.grams.displayedEntries(in: historyStore.appearance(accountId: a)).map(\.id) == [initialOrder[1]])
-assert(historyStore.appearance(accountId: a).gramHistory?.count == 2)
-assert(VisualGramBalanceHistory.grams.displayedEntries(in: historyStore.appearance(accountId: b)).first?.amount == 25)
-historyStore.update(accountId: a) { value in
+assert(history.gramHistory?.last?.amount == -25 && balanceHistoryStore.localGramBalance(accountId: a) == 175)
+assert(!balanceHistoryStore.deleteBalanceHistoryEntry(target: a, currency: .stars, id: "history-transfer"))
+assert(balanceHistoryStore.deleteBalanceHistoryEntry(target: a, currency: .grams, id: "history-transfer"))
+assert(VisualGramBalanceHistory.grams.displayedEntries(in: balanceHistoryStore.appearance(accountId: a)).map(\.id) == [initialOrder[1]])
+assert(balanceHistoryStore.appearance(accountId: a).gramHistory?.count == 2)
+assert(VisualGramBalanceHistory.grams.displayedEntries(in: balanceHistoryStore.appearance(accountId: b)).first?.amount == 25)
+balanceHistoryStore.update(accountId: a) { value in
     value.stars = 125
     value.starsHistory = [.init(id: "stars-entry", date: 1, amount: 125, kind: .topUp, title: nil, peerId: nil, gift: nil)]
 }
-assert(historyStore.editBalanceHistoryEntry(target: a, currency: .stars, id: "stars-entry", edit: .init(amount: 100, date: 4, comment: nil)))
-assert(VisualGramBalanceHistory.stars.displayedEntries(in: historyStore.appearance(accountId: a)).first?.amount == 100)
-assert(historyStore.deleteBalanceHistoryEntry(target: a, currency: .stars, id: "stars-entry"))
-assert(VisualGramBalanceHistory.stars.displayedEntries(in: historyStore.appearance(accountId: a)).isEmpty)
-assert(historyStore.appearance(accountId: a).stars == 125)
+assert(balanceHistoryStore.editBalanceHistoryEntry(target: a, currency: .stars, id: "stars-entry", edit: .init(amount: 100, date: 4, comment: nil)))
+assert(VisualGramBalanceHistory.stars.displayedEntries(in: balanceHistoryStore.appearance(accountId: a)).first?.amount == 100)
+assert(balanceHistoryStore.deleteBalanceHistoryEntry(target: a, currency: .stars, id: "stars-entry"))
+assert(VisualGramBalanceHistory.stars.displayedEntries(in: balanceHistoryStore.appearance(accountId: a)).isEmpty)
+assert(balanceHistoryStore.appearance(accountId: a).stars == 125)
 
 var previewAccount = VisualGramAppearance(enabled: true)
 var previewGift = first
 previewGift.counterpartyId = 30
 previewAccount.gifts = [previewGift]
-previewAccount.gramHistory = historyStore.appearance(accountId: a).gramHistory
+previewAccount.gramHistory = balanceHistoryStore.appearance(accountId: a).gramHistory
 previewAccount.premiumGifts = [.init(id: "premium-preview", recipientId: 40, date: 10, months: 3, stars: 100, text: "", entities: [])]
 previewGift.counterpartyId = a.toInt64()
 let remoteProfile = VisualGramAppearance(enabled: true, gifts: [previewGift])
