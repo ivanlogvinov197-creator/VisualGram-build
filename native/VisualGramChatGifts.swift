@@ -54,7 +54,7 @@ public func visualGramChatGiftMessages(accountPeerId ownId: EnginePeer.Id, peer:
         for transfer in appearance.gramHistory ?? [] where transfer.kind == .transfer && transfer.peerId == peerId.toInt64() && includesDate(transfer.date) {
             guard transfer.amount != 0, transfer.amount != Int64.min, !hidden.contains(transfer.id) else { continue }
             let incoming = transfer.amount > 0
-            appendGift(identifier: transfer.id, date: transfer.date, version: 0, incoming: incoming, author: incoming ? chatPeer : ownPeer, action: .gramTransfer(amount: abs(transfer.amount), peerAddress: "", transactionId: transfer.id, comment: transfer.comment, commentEncrypted: false))
+            appendGift(identifier: transfer.id, date: transfer.date, version: 0, incoming: incoming, author: incoming ? chatPeer : ownPeer, action: .gramTransfer(amount: abs(transfer.amount), peerAddress: VisualGramLocalAppearance.visualWalletAddress(peerId: chatPeer.id), transactionId: transfer.id, comment: transfer.comment, commentEncrypted: false))
         }
     }
     if includePremium && peerId != ownId {

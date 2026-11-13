@@ -57,8 +57,9 @@ public struct VisualGramGift: Codable, Equatable {
         public var peerId: Int64?
         public var gift: StarGift?
         public var comment: String?
+        public var walletAddress: String?
 
-        public init(id: String, date: Int32, amount: Int64, kind: Kind, title: String?, peerId: Int64?, gift: StarGift?, comment: String? = nil) {
+        public init(id: String, date: Int32, amount: Int64, kind: Kind, title: String?, peerId: Int64?, gift: StarGift?, comment: String? = nil, walletAddress: String? = nil) {
             self.id = id
             self.date = date
             self.amount = amount
@@ -67,6 +68,7 @@ public struct VisualGramGift: Codable, Equatable {
             self.peerId = peerId
             self.gift = gift
             self.comment = comment
+            self.walletAddress = walletAddress
         }
     }
     public enum OperationKind: String, Codable {

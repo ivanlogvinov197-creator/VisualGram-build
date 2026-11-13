@@ -20,6 +20,48 @@ public extension VisualGramLocalAppearance {
         NSDecimalNumber(decimal: Decimal(nano) / Decimal(gramScale)).stringValue
     }
 
+    static func visualWalletAddress(peerId: EnginePeer.Id) -> String {
+        let digits = String(UInt64(bitPattern: peerId.toInt64()), radix: 16)
+        let alphabet = Array("abcdefghijklmnop")
+        return "dg" + String(digits.compactMap { $0.hexDigitValue.map { alphabet[$0] } })
+    }
+
+    static func visualWalletPeer(address: String) -> EnginePeer.Id? {
+        guard address.hasPrefix("dg") else { return nil }
+        let payload = address.dropFirst(2)
+        guard !payload.isEmpty, payload.count <= 16,
+              payload.allSatisfy({ "abcdefghijklmnop".contains($0) }) else { return nil }
+        let alphabet = Array("abcdefghijklmnop")
+        let number = payload.reduce(UInt64(0)) { value, character in
+            (value << 4) | UInt64(alphabet.firstIndex(of: character) ?? 0)
+        }
+        guard number > 0, number < (UInt64(1) << 59), (number >> 32) & 7 == 0 else { return nil }
+        let peerId = EnginePeer.Id(Int64(number))
+        return peerId.namespace == Namespaces.Peer.CloudUser && Self.visualWalletAddress(peerId: peerId) == address ? peerId : nil
+    }
+
+    func transferLocalGrams(accountId: EnginePeer.Id, toAddress address: String, amount: Int64, comment: String?, now: Int32, transferId: String) -> VisualGramGramTransferResult {
+        if let peer = Self.visualWalletPeer(address: address) {
+            return self.transferLocalGrams(accountId: accountId, to: peer, amount: amount, comment: comment, now: now, transferId: transferId)
+        }
+        guard !address.isEmpty, amount > 0 else { return .invalidRecipient }
+        var result: VisualGramGramTransferResult = .unavailable
+        self.updateValues(recordOperations: false) { values in
+            let key = String(accountId.toInt64())
+            guard var sender = values[key], sender.enabled, let balance = sender.grams, amount <= balance else {
+                result = .insufficientBalance
+                return
+            }
+            sender.grams = balance - amount
+            var history = sender.gramHistory ?? []
+            history.append(.init(id: transferId, date: now, amount: -amount, kind: .transfer, title: nil, peerId: nil, gift: nil, comment: comment, walletAddress: address))
+            sender.gramHistory = history
+            values[key] = sender
+            result = .sent
+        }
+        return result
+    }
+
     func localGramBalance(accountId: EnginePeer.Id) -> Int64? {
         let value = self.appearance(accountId: accountId)
         return value.enabled ? value.grams : nil
@@ -112,7 +154,7 @@ public extension VisualGramLocalAppearance {
             background = stickers.first(where: { $0.nft.address == Self.cardStickerAddress(local) })?.nft
         }
         // Empty address keeps the native receive/QR action unavailable for a local card.
-        return WalletCard(address: "", balance: grams, stickers: stickers, backgroundNft: background)
+        return WalletCard(address: Self.visualWalletAddress(peerId: peerId), balance: grams, stickers: stickers, backgroundNft: background)
     }
 
     func giftForLocalPurchase(accountId: EnginePeer.Id, gift: StarGift.UniqueGift, starsPerGram: Decimal? = nil) -> StarGift.UniqueGift {
