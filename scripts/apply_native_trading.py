@@ -14,7 +14,8 @@ def apply_trading(root):
             }))
             self.presenceManager = PeerPresenceStatusManager(update: { [weak self] in
 ''')
-    replace(title, '        required init?(coder: NSCoder) {\n', '        deinit { self.visualGramDisposable.dispose() }\n\n        required init?(coder: NSCoder) {\n')
+    replace(title, '        deinit {\n            self.agentSelectionDisposable.dispose()\n',
+            '        deinit {\n            self.agentSelectionDisposable.dispose()\n            self.visualGramDisposable.dispose()\n')
 
     core = root / 'submodules/TelegramCore/Sources/TelegramEngine/Payments/StarGifts.swift'
     signature = 'func _internal_transferStarGift(account: Account, prepaid: Bool, reference: StarGiftReference, peerId: EnginePeer.Id) -> Signal<Never, TransferStarGiftError> {\n'

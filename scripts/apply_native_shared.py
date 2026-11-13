@@ -16,7 +16,8 @@ def apply_shared(root):
             self.requestUpdate?(.immediate)
         }))
 ''')
-    replace(title, '    required public init?(coder aDecoder: NSCoder) {\n', '    deinit { self.visualGramAppearanceDisposable.dispose() }\n\n    required public init?(coder aDecoder: NSCoder) {\n')
+    replace(title, '    deinit {\n        self.agentSelectionDisposable.dispose()\n',
+            '    deinit {\n        self.agentSelectionDisposable.dispose()\n        self.visualGramAppearanceDisposable.dispose()\n')
 
     item = root / "submodules/ChatListUI/Sources/Node/ChatListItem.swift"
     replace(item, '                        if let peer = iconPeer {\n', '                        if let peer = VisualGramLocalAppearance.shared.displayPeer(iconPeer, accountId: item.context.account.peerId) {\n')
