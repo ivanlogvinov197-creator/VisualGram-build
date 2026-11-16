@@ -37,7 +37,7 @@ struct VisualGramActivationGrant: Codable {
 public final class VisualGramActivation {
     public static let shared = VisualGramActivation()
     public static let changed = Notification.Name("VisualGramActivationChanged.v1")
-    private static let endpoint = URL(string: "https://144.31.151.182")!
+    private static let endpoint = URL(string: "https://pay.duckgram.shop")!
     private static let serverKey = Data(base64Encoded: "ssqxs6TifZnbxIyDvCVLV0YOO3DZ8fyrVgT/Bs0Evj0=")!
     private let lock = NSLock()
     private var grant: VisualGramActivationGrant?
