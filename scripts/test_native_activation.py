@@ -69,6 +69,9 @@ assert(vaultAccess.storageKey(id:vaultId,uptime:399) == vaultKey)
 assert(vaultAccess.storageKey(id:vaultId,uptime:400) == nil)
 assert(vaultAccess.storageKey(id:String(repeating:"b",count:32),uptime:100) == nil)
 assert(access.storageKey(id:vaultId,uptime:100) == nil)
+let benchmarkStart = ProcessInfo.processInfo.systemUptime
+for _ in 0..<2000 { assert(vaultAccess.storageKey(id:vaultId,uptime:101)==vaultKey) }
+print("METRIC: 2000 signed storage checks in \((ProcessInfo.processInfo.systemUptime-benchmarkStart)*1000) ms")
 print("PASS: signed grant, device/request binding, expiry, monotonic clock, invalid/tampered replies")
 '''
 
@@ -93,7 +96,9 @@ enum Queue { struct Main { func async(_ f: () -> Void) { f() } }; static func ma
 let store = VisualGramLocalAppearance()
 let own = EnginePeer.Id(10)
 let gift = VisualGramGift(gift:.generic(.init(id:42,title:"Bear",availability:nil,releasedBy:nil)),counterpartyId:20,direction:.sent,date:1,text:"caption")
-store.values["10"] = VisualGramAppearance(enabled:true, gifts:[gift], stars:321)
+var legacyProfile = VisualGramAppearance()
+legacyProfile.enabled=true; legacyProfile.gifts=[gift]; legacyProfile.stars=321
+store.values["10"] = legacyProfile
 store.seedLegacyForTesting()
 let legacyValues = store.values
 VisualGramActivation.shared.hasAccess=false
