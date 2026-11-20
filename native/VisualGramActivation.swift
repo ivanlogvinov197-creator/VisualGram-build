@@ -41,7 +41,27 @@ enum VisualGramAppearanceCipher {
 
     static func identity(defaults: UserDefaults) -> String {
         if let id = defaults.string(forKey: identityName), validIdentity(id) { return id }
+#if os(iOS)
+        // Keep the public vault identifier with the device key across ordinary reinstalls.
+        let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
+                                   kSecAttrService as String: "app.visualgram.appearance.v1",
+                                   kSecAttrAccount as String: "vault-id"]
+        var read = query
+        read[kSecReturnData as String] = true
+        var item: CFTypeRef?
+        if SecItemCopyMatching(read as CFDictionary, &item) == errSecSuccess,
+           let data = item as? Data, let id = String(data: data, encoding: .utf8), validIdentity(id) {
+            defaults.set(id, forKey: identityName)
+            return id
+        }
+#endif
         let id = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+#if os(iOS)
+        var insert = query
+        insert[kSecValueData as String] = Data(id.utf8)
+        insert[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        _ = SecItemAdd(insert as CFDictionary, nil)
+#endif
         defaults.set(id, forKey: identityName)
         return id
     }
