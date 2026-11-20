@@ -857,6 +857,9 @@ func visualGramAppearanceController(context: AccountContext) -> ViewController {
         func add(_ id: Int32, _ section: Int32, _ title: String, _ kind: VisualGramAppearanceEntry.Kind) {
             entries.append(VisualGramAppearanceEntry(stableId: id, section: section, title: title, kind: kind, theme: presentationData.theme))
         }
+        if let warning = VisualGramLocalAppearance.shared.protectedStorageWarning {
+            add(1001, -3, warning, .info)
+        }
         if !VisualGramActivation.shared.hasAccess {
             add(1000, 0, "Активация DuckGram", .button("Введите код"))
         } else {

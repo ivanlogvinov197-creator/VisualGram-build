@@ -250,9 +250,82 @@ public final class VisualGramLocalAppearance {
     private var revisionValue: Int32 = 0
     private var values: [String: VisualGramAppearance]
     private var activationObserver: NSObjectProtocol?
+    private var vaultKey: Data?
+
+    private func writeProtectedValues(_ values: [String: VisualGramAppearance]) -> Bool {
+        guard let key = self.vaultKey else { return false }
+        let id = VisualGramAppearanceCipher.identity(defaults: self.defaults)
+        do {
+            let encoded = try JSONEncoder().encode(values)
+            let encrypted = try VisualGramAppearanceCipher.seal(encoded, key: key, id: id)
+            let migrating = self.defaults.object(forKey: "visualgram.appearance.v3") != nil ||
+                self.defaults.object(forKey: "visualgram.appearance.v2") != nil
+            if migrating {
+                guard try VisualGramAppearanceCipher.open(encrypted, key: key, id: id) == encoded else { return false }
+            }
+            let accounts = values.compactMap { entry -> String? in
+                entry.value.enabled && (entry.value.stars != nil || entry.value.grams != nil) ? entry.key : nil
+            }
+            let slugs = values.values.flatMap { value in value.gifts.compactMap { gift -> String? in
+                if case let .unique(unique) = gift.gift { return VisualGramAppearanceCipher.fingerprint(unique.slug) }
+                return nil
+            } }
+            self.defaults.set(accounts, forKey: "visualgram.appearance.purchaseAccounts.v1")
+            self.defaults.set(slugs, forKey: "visualgram.appearance.purchaseSlugs.v1")
+            self.defaults.set(encrypted, forKey: VisualGramAppearanceCipher.storageName)
+            if migrating && self.defaults.synchronize() {
+                self.defaults.removeObject(forKey: "visualgram.appearance.v3")
+                self.defaults.removeObject(forKey: "visualgram.appearance.v2")
+            }
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    private func restoreProtectedValues() {
+        guard let key = VisualGramActivation.shared.appearanceStorageKey() else {
+            self.lock.lock()
+            if self.defaults.data(forKey: VisualGramAppearanceCipher.storageName) != nil {
+                self.vaultKey = nil
+                self.values = [:]
+            }
+            self.lock.unlock()
+            return
+        }
+        self.lock.lock()
+        defer { self.lock.unlock() }
+        let id = VisualGramAppearanceCipher.identity(defaults: self.defaults)
+        let stored = self.defaults.data(forKey: VisualGramAppearanceCipher.storageName)
+        if let stored {
+            guard let plaintext = try? VisualGramAppearanceCipher.open(stored, key: key, id: id),
+                  let decoded = Self.decodeStoredAppearances(plaintext) else {
+                self.vaultKey = nil
+                self.values = [:]
+                return
+            }
+            self.values = decoded
+        }
+        self.vaultKey = key
+        let pending = self.defaults.array(forKey: "visualgram.appearance.pendingChatHides.v1") as? [[String: Any]] ?? []
+        var candidate = self.values
+        for request in pending {
+            guard let account = (request["account"] as? NSNumber)?.int64Value,
+                  let peer = (request["peer"] as? NSNumber)?.int64Value,
+                  let everyone = request["everyone"] as? Bool else { continue }
+            Self.applyChatGiftHide(values: &candidate, account: account, peer: peer,
+                                  messageId: (request["message"] as? NSNumber)?.int32Value, forEveryone: everyone)
+        }
+        if stored == nil || !pending.isEmpty {
+            if self.writeProtectedValues(candidate) {
+                self.values = candidate
+                self.defaults.removeObject(forKey: "visualgram.appearance.pendingChatHides.v1")
+            }
+        }
+    }
 
     func snapshotValues() -> [String: VisualGramAppearance] {
-        guard VisualGramActivation.shared.hasAccess else { return [:] }
+        guard VisualGramActivation.shared.authorizesAppearance() else { return [:] }
         self.lock.lock()
         defer { self.lock.unlock() }
         return self.values
@@ -260,22 +333,25 @@ public final class VisualGramLocalAppearance {
 
     private init() {
         self.defaults = UserDefaults.standard
-        if let data = self.defaults.data(forKey: "visualgram.appearance.v3"), let decoded = Self.decodeStoredAppearances(data) {
+        if self.defaults.data(forKey: VisualGramAppearanceCipher.storageName) != nil {
+            self.values = [:]
+        } else if let data = self.defaults.data(forKey: "visualgram.appearance.v3"), let decoded = Self.decodeStoredAppearances(data) {
             self.values = decoded
         } else if let data = self.defaults.data(forKey: "visualgram.appearance.v2"), let decoded = Self.decodeStoredAppearances(data) {
             self.values = Self.migrateLegacyAppearances(decoded)
-            if let migrated = try? JSONEncoder().encode(self.values) { self.defaults.set(migrated, forKey: "visualgram.appearance.v3") }
         } else {
             self.values = [:]
         }
         self.activationObserver = NotificationCenter.default.addObserver(forName: VisualGramActivation.changed, object: nil, queue: nil) { [weak self] _ in
             guard let self = self else { return }
+            self.restoreProtectedValues()
             self.lock.lock()
             self.revisionValue &+= 1
             let revision = self.revisionValue
             self.lock.unlock()
             Queue.mainQueue().async { self.revision.set(revision) }
         }
+        self.restoreProtectedValues()
     }
 
     static func migrateLegacyAppearances(_ legacy: [String: VisualGramAppearance]) -> [String: VisualGramAppearance] {
@@ -332,10 +408,27 @@ public final class VisualGramLocalAppearance {
         return self.revision.get()
     }
 
+    public var protectedStorageWarning: String? {
+        guard VisualGramActivation.shared.authorizesAppearance() else { return nil }
+        self.lock.lock()
+        defer { self.lock.unlock() }
+        guard self.vaultKey == nil,
+              self.defaults.data(forKey: VisualGramAppearanceCipher.storageName) != nil else { return nil }
+        return "Не удалось открыть сохранённое оформление. Данные сохранены. Повторите проверку доступа или обратитесь в поддержку."
+    }
+
     // Safety routing only: an expired local purchase must never fall through to a real charge.
     public func blocksExpiredPurchase(accountId: EnginePeer.Id, slug: String? = nil) -> Bool {
-        guard !VisualGramActivation.shared.hasAccess else { return false }
         self.lock.lock(); defer { self.lock.unlock() }
+        guard !(VisualGramActivation.shared.authorizesAppearance() && self.vaultKey != nil) else { return false }
+        if self.defaults.data(forKey: VisualGramAppearanceCipher.storageName) != nil {
+            let accounts = self.defaults.stringArray(forKey: "visualgram.appearance.purchaseAccounts.v1") ?? []
+            if accounts.contains(String(accountId.toInt64())) { return true }
+            if let slug {
+                let slugs = self.defaults.stringArray(forKey: "visualgram.appearance.purchaseSlugs.v1") ?? []
+                if slugs.contains(VisualGramAppearanceCipher.fingerprint(slug)) { return true }
+            }
+        }
         if let value = self.values[String(accountId.toInt64())], value.enabled, value.stars != nil || value.grams != nil { return true }
         if let slug = slug {
             return self.values.values.contains { value in value.gifts.contains { local in
@@ -347,14 +440,14 @@ public final class VisualGramLocalAppearance {
     }
 
     public var pendingScheduledGifts: [VisualGramScheduledGift] {
-        guard VisualGramActivation.shared.hasAccess else { return [] }
+        guard VisualGramActivation.shared.authorizesAppearance() else { return [] }
         self.lock.lock()
         defer { self.lock.unlock() }
         return self.values.values.flatMap { $0.scheduledGifts ?? [] }
     }
 
     public func deliverAllScheduledGifts(now: Int32) -> [VisualGramScheduledGift] {
-        guard VisualGramActivation.shared.hasAccess else { return [] }
+        guard VisualGramActivation.shared.authorizesAppearance() else { return [] }
         self.lock.lock()
         let accounts = self.values.compactMap { key, value -> EnginePeer.Id? in
             guard !(value.scheduledGifts ?? []).isEmpty, let id = Int64(key) else { return nil }
@@ -365,7 +458,7 @@ public final class VisualGramLocalAppearance {
     }
 
     public func appearance(accountId: EnginePeer.Id, targetPeerId: EnginePeer.Id? = nil) -> VisualGramAppearance {
-        guard VisualGramActivation.shared.hasAccess else { return VisualGramAppearance() }
+        guard VisualGramActivation.shared.authorizesAppearance() else { return VisualGramAppearance() }
         self.lock.lock()
         defer { self.lock.unlock() }
         return self.values[String((targetPeerId ?? accountId).toInt64())] ?? VisualGramAppearance()
@@ -383,13 +476,14 @@ public final class VisualGramLocalAppearance {
 
     func updateValues(recordOperations: Bool = true, allowWhileLocked: Bool = false, _ transform: (inout [String: VisualGramAppearance]) -> Void) {
         self.lock.lock()
-        guard allowWhileLocked || VisualGramActivation.shared.hasAccess else { self.lock.unlock(); return }
+        guard allowWhileLocked || VisualGramActivation.shared.authorizesAppearance() else { self.lock.unlock(); return }
+        guard self.vaultKey != nil else { self.lock.unlock(); return }
         let previous = self.values
-        transform(&self.values)
-        if recordOperations { Self.recordGiftOperations(previous: previous, values: &self.values) }
-        if let data = try? JSONEncoder().encode(self.values) {
-            self.defaults.set(data, forKey: "visualgram.appearance.v3")
-        }
+        var candidate = previous
+        transform(&candidate)
+        if recordOperations { Self.recordGiftOperations(previous: previous, values: &candidate) }
+        guard self.writeProtectedValues(candidate) else { self.lock.unlock(); return }
+        self.values = candidate
         self.revisionValue &+= 1
         let revision = self.revisionValue
         self.lock.unlock()
@@ -437,7 +531,23 @@ public final class VisualGramLocalAppearance {
         guard peerId.namespace == Namespaces.Peer.CloudUser else { return }
         let account = accountId.toInt64()
         let peer = peerId.toInt64()
+        self.lock.lock()
+        if self.vaultKey == nil {
+            var pending = self.defaults.array(forKey: "visualgram.appearance.pendingChatHides.v1") as? [[String: Any]] ?? []
+            var request: [String: Any] = ["account": account, "peer": peer, "everyone": forEveryone]
+            if let messageId { request["message"] = messageId }
+            pending.append(request)
+            self.defaults.set(pending, forKey: "visualgram.appearance.pendingChatHides.v1")
+            self.lock.unlock()
+            return
+        }
+        self.lock.unlock()
         self.updateValues(recordOperations: false, allowWhileLocked: true) { values in
+            Self.applyChatGiftHide(values: &values, account: account, peer: peer, messageId: messageId, forEveryone: forEveryone)
+        }
+    }
+
+    private static func applyChatGiftHide(values: inout [String: VisualGramAppearance], account: Int64, peer: Int64, messageId: Int32?, forEveryone: Bool) {
             var keys = Set<String>()
             func include(_ identifier: String, key: String) {
                 if messageId == nil || messageId == -Int32(Self.chatGiftHash(identifier) & 0x3fffffff) - 1 {
@@ -476,7 +586,6 @@ public final class VisualGramLocalAppearance {
             }
             hide(for: account, other: peer)
             if forEveryone && peer != account { hide(for: peer, other: account) }
-        }
     }
 
     public func displayPeer(_ peer: EnginePeer?, accountId: EnginePeer.Id) -> EnginePeer? {

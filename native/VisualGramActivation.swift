@@ -2,6 +2,77 @@ import Foundation
 import CryptoKit
 import Security
 
+struct VisualGramSignedAccess {
+    private let payload: Data
+    private let signature: Data
+    private let publicKey: Data
+    private let device: String
+    private let request: String
+    private let startUptime: TimeInterval
+
+    init?(payload: Data, signature: Data, publicKey: Data, device: String, request: String, startUptime: TimeInterval) {
+        guard startUptime.isFinite, startUptime >= 0,
+              VisualGramActivationGrant.verify(payload: payload, signature: signature, publicKey: publicKey, device: device, request: request) != nil else { return nil }
+        self.payload = payload
+        self.signature = signature
+        self.publicKey = publicKey
+        self.device = device
+        self.request = request
+        self.startUptime = startUptime
+    }
+
+    func permitsAccess(uptime: TimeInterval) -> Bool {
+        guard let grant = VisualGramActivationGrant.verify(payload: self.payload, signature: self.signature, publicKey: self.publicKey, device: self.device, request: self.request) else { return false }
+        return grant.permitsAccess(startUptime: self.startUptime, uptime: uptime)
+    }
+
+    func storageKey(id: String, uptime: TimeInterval) -> Data? {
+        guard let grant = VisualGramActivationGrant.verify(payload: self.payload, signature: self.signature, publicKey: self.publicKey, device: self.device, request: self.request),
+              grant.permitsAccess(startUptime: self.startUptime, uptime: uptime),
+              grant.storage_id == id, let encoded = grant.storage_key,
+              let key = Data(base64Encoded: encoded), key.count == 32 else { return nil }
+        return key
+    }
+}
+
+enum VisualGramAppearanceCipher {
+    static let storageName = "visualgram.appearance.v4"
+    static let identityName = "visualgram.appearance.vault.v1"
+
+    static func identity(defaults: UserDefaults) -> String {
+        if let id = defaults.string(forKey: identityName), validIdentity(id) { return id }
+        let id = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+        defaults.set(id, forKey: identityName)
+        return id
+    }
+
+    static func validIdentity(_ id: String) -> Bool {
+        return id.count == 32 && id.allSatisfy { "0123456789abcdef".contains($0) }
+    }
+
+    static func seal(_ data: Data, key: Data, id: String) throws -> Data {
+        guard key.count == 32, validIdentity(id) else { throw CocoaError(.coderInvalidValue) }
+        let sealed = try AES.GCM.seal(data, using: SymmetricKey(data: key), authenticating: Data(("duckgram.appearance.v4:" + id).utf8))
+        guard let combined = sealed.combined else { throw CocoaError(.coderInvalidValue) }
+        return combined
+    }
+
+    static func open(_ data: Data, key: Data, id: String) throws -> Data {
+        guard key.count == 32, validIdentity(id) else { throw CocoaError(.coderInvalidValue) }
+        return try AES.GCM.open(AES.GCM.SealedBox(combined: data), using: SymmetricKey(data: key), authenticating: Data(("duckgram.appearance.v4:" + id).utf8))
+    }
+
+    static func fingerprint(_ value: String) -> String {
+        return SHA256.hash(data: Data(value.utf8)).map { String(format: "%02x", $0) }.joined()
+    }
+}
+
+private final class VisualGramActivationSessionDelegate: NSObject, URLSessionTaskDelegate {
+    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
+        completionHandler(nil)
+    }
+}
+
 // The server key is public. Neither code-generation nor signing secrets ship in the IPA.
 struct VisualGramActivationGrant: Codable {
     let v: Int
@@ -11,9 +82,12 @@ struct VisualGramActivationGrant: Codable {
     let trial_until: Int64
     let status: String
     let lease_seconds: Int
+    var storage_id: String? = nil
+    var storage_key: String? = nil
 
     static func verify(payload: Data, signature: Data, publicKey: Data, device: String, request: String) -> VisualGramActivationGrant? {
-        guard let key = try? Curve25519.Signing.PublicKey(rawRepresentation: publicKey),
+        guard !payload.isEmpty, payload.count <= 4096, signature.count == 64, publicKey.count == 32,
+              let key = try? Curve25519.Signing.PublicKey(rawRepresentation: publicKey),
               key.isValidSignature(signature, for: payload),
               let grant = try? JSONDecoder().decode(Self.self, from: payload),
               grant.v == 1, grant.device == device, grant.request == request,
@@ -41,6 +115,7 @@ public final class VisualGramActivation {
     private static let serverKey = Data(base64Encoded: "ssqxs6TifZnbxIyDvCVLV0YOO3DZ8fyrVgT/Bs0Evj0=")!
     private let lock = NSLock()
     private var grant: VisualGramActivationGrant?
+    private var signedAccess: VisualGramSignedAccess?
     private var grantUptime: TimeInterval = 0
     private var message = "Для проверки доступа подключитесь к интернету."
     private var started = false
@@ -54,6 +129,7 @@ public final class VisualGramActivation {
     private var key: SecKey?
     private var hint: String?
     private let session: URLSession
+    private let storageId = VisualGramAppearanceCipher.identity(defaults: .standard)
 
     private init() {
         let config = URLSessionConfiguration.ephemeral
@@ -62,12 +138,27 @@ public final class VisualGramActivation {
         config.urlCache = nil
         config.httpCookieStorage = nil
         config.httpShouldSetCookies = false
-        self.session = URLSession(configuration: config)
+        self.session = URLSession(configuration: config, delegate: VisualGramActivationSessionDelegate(), delegateQueue: nil)
     }
 
     public var hasAccess: Bool {
         self.lock.lock(); defer { self.lock.unlock() }
         return self.grant?.permitsAccess(startUptime: self.grantUptime, uptime: ProcessInfo.processInfo.systemUptime) ?? false
+    }
+
+    @inline(__always)
+    func authorizesAppearance() -> Bool {
+        self.lock.lock()
+        let access = self.signedAccess
+        self.lock.unlock()
+        return access?.storageKey(id: self.storageId, uptime: ProcessInfo.processInfo.systemUptime) != nil
+    }
+
+    func appearanceStorageKey() -> Data? {
+        self.lock.lock()
+        let access = self.signedAccess
+        self.lock.unlock()
+        return access?.storageKey(id: self.storageId, uptime: ProcessInfo.processInfo.systemUptime)
     }
 
     public var statusText: String {
@@ -103,7 +194,7 @@ public final class VisualGramActivation {
     }
 
     private func notify() {
-        let access = self.hasAccess
+        let access = self.authorizesAppearance()
         guard access != self.reportedAccess else { return }
         self.reportedAccess = access
         NotificationCenter.default.post(name: Self.changed, object: nil)
@@ -114,6 +205,7 @@ public final class VisualGramActivation {
         self.inFlight = false
         self.lock.lock()
         self.grant = nil
+        self.signedAccess = nil
         self.message = message
         self.lock.unlock()
         self.notify()
@@ -216,21 +308,27 @@ public final class VisualGramActivation {
             switch result {
             case let .failure(error): self.finish(error:error, completion:completion)
             case let .success(challenge):
-                guard let id = challenge["id"] as? String, id.count == 48,
+                guard let id = challenge["id"] as? String, id.count == 48, id.allSatisfy({ "0123456789abcdef".contains($0) }),
                       let nonce = challenge["nonce"] as? String, Data(base64Encoded:nonce)?.count == 32 else { self.finish(error:self.failure(),completion:completion); return }
                 let codeHash = self.hex(Data(SHA256.hash(data:Data(normalized.utf8))))
-                let proof = Data("visualgram-v1\n\(id)\n\(nonce)\n\(hint)\n\(codeHash)".utf8)
+                let proof = Data("visualgram-v1\n\(id)\n\(nonce)\n\(hint)\n\(codeHash)\nduckgram-storage-v1\n\(self.storageId)".utf8)
                 guard let signature = SecKeyCreateSignature(identity.0,.ecdsaSignatureMessageX962SHA256,proof as CFData,nil) as Data? else { self.finish(error:self.failure(),completion:completion); return }
-                self.post("v1/session",["public_key":rawKey,"device_hint":hint,"challenge_id":id,"signature":signature.base64EncodedString(),"code":normalized]) { [weak self] result in
+                self.post("v1/session",["public_key":rawKey,"device_hint":hint,"challenge_id":id,"signature":signature.base64EncodedString(),"code":normalized,"storage_id":self.storageId]) { [weak self] result in
                     guard let self = self, self.generation == generation else { return }
                     switch result {
                     case let .failure(error): self.finish(error:error,completion:completion)
                     case let .success(object):
                         guard let payloadString = object["payload"] as? String, let payload = Data(base64Encoded:payloadString),
                               let signatureString = object["signature"] as? String, let signature = Data(base64Encoded:signatureString),
-                              let grant = VisualGramActivationGrant.verify(payload:payload,signature:signature,publicKey:Self.serverKey,device:self.hex(Data(SHA256.hash(data:identity.1))),request:id) else { self.finish(error:self.failure(),completion:completion); return }
+                              let grant = VisualGramActivationGrant.verify(payload:payload,signature:signature,publicKey:Self.serverKey,device:self.hex(Data(SHA256.hash(data:identity.1))),request:id),
+                              let access = VisualGramSignedAccess(payload: payload, signature: signature, publicKey: Self.serverKey, device: grant.device, request: id, startUptime: startUptime) else { self.finish(error:self.failure(),completion:completion); return }
+                        if grant.permitsAccess(startUptime: startUptime, uptime: ProcessInfo.processInfo.systemUptime),
+                           access.storageKey(id: self.storageId, uptime: ProcessInfo.processInfo.systemUptime) == nil {
+                            self.finish(error: self.failure(), completion: completion)
+                            return
+                        }
                         self.inFlight = false
-                        self.lock.lock(); self.grant = grant; self.grantUptime = startUptime; self.lock.unlock()
+                        self.lock.lock(); self.grant = grant; self.signedAccess = access; self.grantUptime = startUptime; self.lock.unlock()
                         self.notify()
                         completion?(nil)
                     }
