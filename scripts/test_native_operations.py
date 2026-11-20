@@ -11,14 +11,19 @@ def source():
     base=base.replace('public struct PeerEmojiStatus: Codable {','public struct PeerEmojiStatus: Codable, Equatable {').replace('public enum Content: Codable { case starGift','public enum Content: Codable, Equatable { case starGift')
     base=base.replace('    static func editGiftOperationNarrative(_ original: VisualGramGift, profile: Int64, counterparty: Int64?, date: Int32, text: String, values: inout [String: VisualGramAppearance]) {}\n','')
     actual=(root/'native/VisualGramLocalAppearance.swift').read_text(encoding='utf-8')
+    cipher=(root/'native/VisualGramActivation.swift').read_text(encoding='utf-8')
+    cipher=cipher[cipher.index('enum VisualGramAppearanceCipher'):cipher.index('private final class VisualGramActivationSessionDelegate')]
+    base='import CryptoKit\n'+cipher+base
+    persistence=actual[actual.index('    private func writeProtectedValues('):actual.index('    private func restoreProtectedValues(')]
     update=actual[actual.index('    func updateValues('):actual.index('    public func reset(')]
     old='    func updateValues(recordOperations: Bool = true, _ change: (inout [String: VisualGramAppearance]) -> Void) { let hook = beforeUpdate; beforeUpdate = nil; hook?(); change(&values) }'
     assert old in base
     base=base.replace(old,'''    private let lock = NSLock()
     private let defaults = UserDefaults(suiteName: UUID().uuidString)!
+    private let vaultKey: Data? = Data(repeating: 7, count: 32)
     private var revisionValue: Int32 = 0
     private let revision = OperationTestPromise()
-'''+update)
+'''+persistence+update)
     old='    func update(accountId: EnginePeer.Id, targetPeerId: EnginePeer.Id? = nil, _ change: (inout VisualGramAppearance) -> Void) { let key = String((targetPeerId ?? accountId).toInt64()); var value = values[key] ?? VisualGramAppearance(); change(&value); values[key] = value }'
     actual_update=actual[actual.index('    public func update(accountId:'):actual.index('    func updateValues(')]
     assert old in base;base=base.replace(old,actual_update)

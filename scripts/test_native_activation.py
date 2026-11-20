@@ -22,6 +22,15 @@ func verify(_ data: (Data,Data), device: String = "device", request: String = "r
 }
 let valid = envelope()
 let grant = verify(valid)!
+let access = VisualGramSignedAccess(payload:valid.0,signature:valid.1,publicKey:publicKey,device:"device",request:"request",startUptime:100)!
+assert(access.permitsAccess(uptime:399.999))
+assert(!access.permitsAccess(uptime:400))
+assert(!access.permitsAccess(uptime:99))
+assert(!access.permitsAccess(uptime:.infinity))
+assert(VisualGramSignedAccess(payload:envelope("active").0,signature:valid.1,publicKey:publicKey,device:"device",request:"request",startUptime:100)==nil)
+assert(VisualGramSignedAccess(payload:valid.0,signature:valid.1,publicKey:publicKey,device:"other",request:"request",startUptime:100)==nil)
+assert(VisualGramSignedAccess(payload:valid.0,signature:valid.1,publicKey:publicKey,device:"device",request:"replay",startUptime:100)==nil)
+assert(VisualGramSignedAccess(payload:valid.0,signature:valid.1,publicKey:publicKey,device:"device",request:"request",startUptime:.nan)==nil)
 assert(grant.permitsAccess(startUptime:100,uptime:100))
 assert(grant.permitsAccess(startUptime:100,uptime:399.999))
 assert(!grant.permitsAccess(startUptime:100,uptime:400))
@@ -39,6 +48,27 @@ assert(verify(envelope("unknown"))==nil)
 assert(!verify(envelope("expired",lease:0))!.permitsAccess(startUptime:100,uptime:100))
 assert(verify(envelope("active",time:999999,until:1))!.permitsAccess(startUptime:100,uptime:200))
 assert(VisualGramActivationGrant.verify(payload:valid.0,signature:valid.1,publicKey:Curve25519.Signing.PrivateKey().publicKey.rawRepresentation,device:"device",request:"request")==nil)
+let vaultId = String(repeating: "a", count: 32)
+let vaultKey = Data(repeating: 7, count: 32)
+let plaintext = Data("saved visual profile".utf8)
+let encrypted = try! VisualGramAppearanceCipher.seal(plaintext, key: vaultKey, id: vaultId)
+assert(encrypted != plaintext)
+assert((try? VisualGramAppearanceCipher.open(encrypted,key:vaultKey,id:vaultId)) == plaintext)
+assert((try? VisualGramAppearanceCipher.open(encrypted,key:Data(repeating:8,count:32),id:vaultId)) == nil)
+assert((try? VisualGramAppearanceCipher.open(encrypted,key:vaultKey,id:String(repeating:"b",count:32))) == nil)
+var changed = encrypted
+changed[changed.startIndex] ^= 1
+assert((try? VisualGramAppearanceCipher.open(changed,key:vaultKey,id:vaultId)) == nil)
+var fields = try! JSONSerialization.jsonObject(with: valid.0) as! [String:Any]
+fields["storage_id"] = vaultId
+fields["storage_key"] = vaultKey.base64EncodedString()
+let vaultPayload = try! JSONSerialization.data(withJSONObject:fields)
+let vaultSignature = try! key.signature(for:vaultPayload)
+let vaultAccess = VisualGramSignedAccess(payload:vaultPayload,signature:vaultSignature,publicKey:publicKey,device:"device",request:"request",startUptime:100)!
+assert(vaultAccess.storageKey(id:vaultId,uptime:399) == vaultKey)
+assert(vaultAccess.storageKey(id:vaultId,uptime:400) == nil)
+assert(vaultAccess.storageKey(id:String(repeating:"b",count:32),uptime:100) == nil)
+assert(access.storageKey(id:vaultId,uptime:100) == nil)
 print("PASS: signed grant, device/request binding, expiry, monotonic clock, invalid/tampered replies")
 '''
 
@@ -46,11 +76,14 @@ def store_source():
     source = delivery.source().split(delivery.CHECKS)[0]
     actual = (ROOT/'native/VisualGramLocalAppearance.swift').read_text(encoding='utf-8')
     update = actual[actual.index('    func updateValues('):actual.index('    public func reset(')]
-    snapshot = actual[actual.index('    func snapshotValues('):actual.index('    private init()')]
+    snapshot = actual[actual.index('    private var vaultKey:'):actual.index('    private init()')]
+    cipher = (ROOT/'native/VisualGramActivation.swift').read_text(encoding='utf-8')
+    cipher = cipher[cipher.index('enum VisualGramAppearanceCipher'):cipher.index('private final class VisualGramActivationSessionDelegate')]
+    source = 'import CryptoKit\n' + cipher + source
+    source = source.replace('    private var vaultKey: Data? = Data(repeating: 7, count: 32)\n', '')
     purchase_safety = actual[actual.index('    public func blocksExpiredPurchase('):actual.index('    public var pendingScheduledGifts:')]
     stub = '    func updateValues(recordOperations: Bool = true, allowWhileLocked: Bool = false, _ change: (inout [String: VisualGramAppearance]) -> Void) { change(&values) }'
-    source = source.replace(stub, '''    private let defaults = UserDefaults(suiteName: UUID().uuidString)!
-    private var revisionValue: Int32 = 0
+    source = source.replace(stub, '''    private var revisionValue: Int32 = 0
     private let revision = ActivationTestPromise()
     static func recordGiftOperations(previous: [String: VisualGramAppearance], values: inout [String: VisualGramAppearance]) {}
 ''' + update + snapshot + purchase_safety)
@@ -59,10 +92,24 @@ final class ActivationTestPromise { func set(_ value: Int32) {} }
 enum Queue { struct Main { func async(_ f: () -> Void) { f() } }; static func mainQueue() -> Main { Main() } }
 let store = VisualGramLocalAppearance()
 let own = EnginePeer.Id(10)
-let gift = VisualGramGift(gift:.generic(.init(id:42,title:"Bear",availability:nil,releasedBy:nil)),counterpartyId:nil,date:1,text:"caption")
+let gift = VisualGramGift(gift:.generic(.init(id:42,title:"Bear",availability:nil,releasedBy:nil)),counterpartyId:20,direction:.sent,date:1,text:"caption")
+store.values["10"] = VisualGramAppearance(enabled:true, gifts:[gift], stars:321)
+store.seedLegacyForTesting()
+let legacyValues = store.values
+VisualGramActivation.shared.hasAccess=false
+store.restoreProtectedValuesForTesting()
+assert(store.protectedBytesForTesting() == nil && store.legacyDataForTesting() != nil)
+assert(store.values==legacyValues, "legacy values lost before server grants key")
+VisualGramActivation.shared.hasAccess=true
+store.restoreProtectedValuesForTesting()
+assert(store.values==legacyValues && store.legacyDataForTesting()==nil, "legacy migration lost values")
+assert(store.protectedBytesForTesting() != nil)
 store.update(accountId:own) { $0.enabled=true; $0.premium=true; $0.stars=500; $0.grams=100; $0.gifts=[gift] }
 store.scheduleGift(accountId:own,targetPeerId:own,gift:gift,deliveryDate:10)
 let saved = store.values
+let plaintextBeforeLock = store.encodedValuesForTesting()!
+assert(store.protectedBytesForTesting()! != plaintextBeforeLock)
+assert(store.legacyDataForTesting() == nil)
 VisualGramActivation.shared.hasAccess=false
 assert(store.appearance(accountId:own)==VisualGramAppearance(), "locked appearance leaked")
 assert(store.snapshotValues().isEmpty, "market data leaked")
@@ -73,12 +120,58 @@ store.update(accountId:own) { _ in changed=true }
 assert(!changed && store.values==saved,"locked mutation or data loss")
 assert(store.blocksExpiredPurchase(accountId:own),"expired local purchase falls through")
 VisualGramActivation.shared.hasAccess=true
+VisualGramActivation.shared.appearanceAuthorization=false
+assert(store.appearance(accountId:own)==VisualGramAppearance(), "forcing UI access exposed stored appearance")
+assert(store.snapshotValues().isEmpty)
+var tampered=false
+store.update(accountId:own) { _ in tampered=true }
+assert(!tampered && store.values==saved, "forcing UI access enabled changes")
+assert(store.blocksExpiredPurchase(accountId:own))
+VisualGramActivation.shared.appearanceAuthorization=nil
 assert(store.appearance(accountId:own).gifts.count==1)
 assert(store.appearance(accountId:own).stars==500)
 assert(!store.pendingScheduledGifts.isEmpty,"activation did not restore schedules")
 assert(!store.blocksExpiredPurchase(accountId:own))
+store.restoreProtectedValuesForTesting()
+assert(store.values==saved)
+let encryptedBeforeDamage = store.protectedBytesForTesting()!
+store.damageStorageForTesting()
+store.restoreProtectedValuesForTesting()
+assert(store.values.isEmpty)
+assert(store.blocksExpiredPurchase(accountId:own), "corrupt encrypted state fell through to real payment")
+var wroteAfterDamage=false
+store.update(accountId:own) { _ in wroteAfterDamage=true }
+assert(!wroteAfterDamage)
+store.replaceProtectedBytesForTesting(encryptedBeforeDamage)
+store.restoreProtectedValuesForTesting()
+assert(store.values==saved)
+// Cold launch has no decrypted values. Chat deletion while locked must survive unlock.
+VisualGramActivation.shared.hasAccess=false
+store.restoreProtectedValuesForTesting()
+assert(store.values.isEmpty)
+assert(store.blocksExpiredPurchase(accountId:own), "cold locked store lost safety index")
+store.hideChatGifts(accountId:own,peerId:EnginePeer.Id(20),forEveryone:false)
+VisualGramActivation.shared.hasAccess=true
+store.restoreProtectedValuesForTesting()
+assert(store.appearance(accountId:own).gifts==saved["10"]!.gifts)
+assert(!store.hiddenChatGiftKeys(accountId:own,peerId:EnginePeer.Id(20)).isEmpty)
+assert(store.hiddenChatGiftKeys(accountId:EnginePeer.Id(20),peerId:own).isEmpty, "delete for self hid receiver copy")
+store.hideChatGifts(accountId:own,peerId:EnginePeer.Id(20),forEveryone:true)
+assert(!store.hiddenChatGiftKeys(accountId:EnginePeer.Id(20),peerId:own).isEmpty)
+let hiddenValues=store.values
+store.restoreProtectedValuesForTesting()
+assert(store.values==hiddenValues, "deferred deletion not persisted")
 print("PASS: real central read/write/schedule/market guards; preserved data restored after activation")
 '''
+    source = source.replace('    private func restoreProtectedValues()', '    func restoreProtectedValuesForTesting()')
+    source = source.replace('    func snapshotValues()', '''
+    func encodedValuesForTesting() -> Data? { try? JSONEncoder().encode(self.values) }
+    func protectedBytesForTesting() -> Data? { self.defaults.data(forKey:VisualGramAppearanceCipher.storageName) }
+    func legacyDataForTesting() -> Data? { self.defaults.data(forKey:"visualgram.appearance.v3") }
+    func replaceProtectedBytesForTesting(_ data:Data) { self.defaults.set(data,forKey:VisualGramAppearanceCipher.storageName) }
+    func damageStorageForTesting() { self.replaceProtectedBytesForTesting(Data("broken".utf8)) }
+    func seedLegacyForTesting() { self.defaults.set(self.encodedValuesForTesting()!,forKey:"visualgram.appearance.v3") }
+    func snapshotValues()''')
     return source
 
 def main():

@@ -43,6 +43,8 @@ public typealias VisualGramGiftCollection = Int
 STORE = r'''
 public final class VisualGramLocalAppearance {
     private let lock = NSLock()
+    private let defaults = UserDefaults(suiteName: UUID().uuidString)!
+    private var vaultKey: Data? = Data(repeating: 7, count: 32)
     var values: [String: VisualGramAppearance] = [:]
     func updateValues(recordOperations: Bool = true, allowWhileLocked: Bool = false, _ change: (inout [String: VisualGramAppearance]) -> Void) { change(&values) }
 '''

@@ -17,7 +17,13 @@ def source():
 
 STUBS = r'''
 import Foundation
-public final class VisualGramActivation { public static let shared = VisualGramActivation(); public var hasAccess = true }
+public final class VisualGramActivation {
+    public static let shared = VisualGramActivation()
+    public var hasAccess = true
+    public var appearanceAuthorization: Bool?
+    func authorizesAppearance() -> Bool { appearanceAuthorization ?? hasAccess }
+    func appearanceStorageKey() -> Data? { authorizesAppearance() ? Data(repeating: 7, count: 32) : nil }
+}
 public typealias MessageTextEntity = Int
 public struct StarsAmount: Codable, Equatable { let value: Int64; let nanos: Int32 }
 public struct CurrencyAmount: Codable, Equatable { public enum Currency: Codable { case stars, ton }; let amount: StarsAmount; let currency: Currency }
