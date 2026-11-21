@@ -15,6 +15,7 @@ def apply(root, project):
     shutil.copyfile(project / "native/VisualGramActivation.swift", core / "VisualGramActivation.swift")
     shutil.copyfile(project / "native/VisualGramGiftOperations.swift", core / "VisualGramGiftOperations.swift")
     shutil.copyfile(project / "native/VisualGramGiftManagement.swift", core / "VisualGramGiftManagement.swift")
+    shutil.copyfile(project / "native/VisualGramCollectionImport.swift", core / "VisualGramCollectionImport.swift")
     shutil.copyfile(project / "native/VisualGramGiftTrading.swift", core / "VisualGramGiftTrading.swift")
     shutil.copyfile(project / "native/VisualGramAppearanceController.swift", peer / "Sources/VisualGramAppearanceController.swift")
     shutil.copyfile(project / "native/VisualGramChatGifts.swift", core / "VisualGramChatGifts.swift")

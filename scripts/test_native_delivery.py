@@ -17,7 +17,11 @@ def source():
     access = appearance[appearance.index("    public func appearance("):appearance.index("    func updateValues(")]
     dispatch = appearance[appearance.index("    public var pendingScheduledGifts:"):appearance.index("    public func appearance(")]
     gift_model = appearance[appearance.index("public struct VisualGramGift:"):appearance.index("    public func displayGift(")] + "}\n"
-    return ENGINE_STUBS + STUBS + gift_model + model + appearance_model + STORE + migration + dispatch + access + reset + "}\npublic extension VisualGramLocalAppearance {\n" + methods + "}\n" + CHECKS
+    collection = (root / "native/VisualGramCollectionImport.swift").read_text(encoding="utf-8")
+    collection_model = collection[collection.index("public enum VisualGramCollectionImport"):collection.index("    // NETWORK:")] + "}\n"
+    collection_methods = collection[collection.index("    @discardableResult\n    static func appendPublicCollection"):]
+    collection_support = management[management.index("    static func orderedOwnedGifts("):management.index("    static func recordGiftOperations(")]
+    return ENGINE_STUBS + STUBS + gift_model + model + appearance_model + collection_model + STORE + migration + dispatch + access + reset + "}\npublic extension VisualGramLocalAppearance {\n" + collection_support + methods + collection_methods + CHECKS + COLLECTION_CHECKS
 
 
 STUBS = r'''
@@ -191,6 +195,56 @@ assert(restart.deliverAllScheduledGifts(now: 1400).count == 2, "one scheduled or
 assert(restart.deliverAllScheduledGifts(now: 1401).isEmpty)
 assert(restart.appearance(accountId: own).gifts.count == 4)
 print("PASS: distinct ordinary copies/references, reciprocal chats, simultaneous schedules/restart, exactly-once delivery, shared profiles and migration")
+'''
+
+
+COLLECTION_CHECKS = r'''
+assert(VisualGramCollectionImport.username(from: " @Collectibles_1 \n") == "Collectibles_1")
+for invalid in ["", "@", "@@user", "https://t.me/user", "a/b", "test?admin=1", "has space", "12345", String(repeating: "a", count: 33)] {
+    assert(VisualGramCollectionImport.username(from: invalid) == nil, "invalid collection owner accepted")
+}
+func collectionItem(_ slug: String, date: Int32 = 10) -> VisualGramCollectionImport.Item {
+    return .init(gift: StarGift.UniqueGift(id: 901, giftId: 9, title: "Collection", number: 1, slug: slug, owner: .peerId(other), attributes: [.model(91), .pattern(92), .backdrop(93)], availability: .init(issued: 1, total: 10), giftAddress: nil, resellAmounts: nil, resellForTonOnly: false, releasedBy: nil, valueAmount: nil, valueCurrency: nil, valueUsdAmount: nil, flags: [], themePeerId: nil, peerColor: nil, hostPeerId: nil, minOfferStars: nil, craftChancePermille: nil), date: date)
+}
+let publicA = collectionItem("Collectible-1"), publicB = collectionItem("Collectible-2", date: 20)
+var pages = VisualGramCollectionImport.Pages()
+let collectionOffset2 = try pages.append([publicA], nextOffset: "page2")
+assert(collectionOffset2 == "page2")
+let collectionOffset3 = try pages.append([], nextOffset: "page3")
+assert(collectionOffset3 == "page3", "a filtered page prevented loading later gifts")
+let collectionEnd = try pages.append([collectionItem("collectible-1"), publicB], nextOffset: "")
+assert(collectionEnd == nil)
+assert(pages.items.map { $0.gift.slug } == ["Collectible-1", "Collectible-2"], "pagination changed order or duplicated NFT")
+do { _ = try pages.append([], nextOffset: "page2"); assertionFailure("repeated offset accepted") }
+catch VisualGramCollectionImport.ImportError.invalidPagination {} catch { assertionFailure("unexpected page error") }
+var limited = VisualGramCollectionImport.Pages(maxItems: 1)
+do { _ = try limited.append([publicA, publicB], nextOffset: nil); assertionFailure("size limit ignored") }
+catch VisualGramCollectionImport.ImportError.tooLarge {} catch { assertionFailure("unexpected limit error") }
+let collectionStore = VisualGramLocalAppearance()
+var retained = VisualGramGift(gift: ordinary, counterpartyId: nil, date: 5, text: "Keep me")
+retained.pinnedToTop = true
+collectionStore.addGift(accountId: own, targetPeerId: own, gift: retained)
+collectionStore.update(accountId: own) { $0.stars = 345; $0.grams = 123456789; $0.premium = true }
+let oldOperations = VisualGramLocalAppearance.giftOperations(in: collectionStore.appearance(accountId: own))
+assert(collectionStore.importPublicCollection(accountId: own, targetPeerId: own, items: pages.items) == 2)
+let imported = collectionStore.appearance(accountId: own)
+assert(imported.gifts.count == 3 && imported.gifts[0] == retained, "collection import overwrote existing gift")
+assert(imported.stars == 345 && imported.grams == 123456789 && imported.premium, "collection import changed profile or balances")
+assert(VisualGramLocalAppearance.giftOperations(in: imported) == oldOperations, "collection import fabricated a receipt")
+assert(collectionStore.chatGifts(accountId: own, peerId: other).isEmpty, "collection import fabricated a chat message")
+assert(imported.gifts.dropFirst().allSatisfy { $0.counterpartyId == nil && $0.direction == .received && $0.savedToProfile == true })
+assert(imported.giftOrder == imported.gifts.map { $0.identifier }, "source collection order not retained")
+assert(collectionStore.appearance(accountId: other).gifts.isEmpty, "source profile changed")
+assert(collectionStore.importPublicCollection(accountId: own, targetPeerId: own, items: [publicA, collectionItem("COLLECTIBLE-2")]) == 0)
+let collectionReload = VisualGramLocalAppearance()
+collectionReload.values = try JSONDecoder().decode([String: VisualGramAppearance].self, from: JSONEncoder().encode(collectionStore.values))
+assert(collectionReload.appearance(accountId: own) == imported, "imported collection failed persistence round trip")
+assert(collectionReload.importPublicCollection(accountId: own, targetPeerId: own, items: pages.items) == 0)
+VisualGramActivation.shared.hasAccess = false
+assert(collectionStore.importPublicCollection(accountId: own, targetPeerId: own, items: [collectionItem("Locked-1")]) == nil)
+VisualGramActivation.shared.hasAccess = true
+assert(collectionStore.appearance(accountId: own) == imported, "locked import changed saved data")
+print("PASS: public NFT collection pagination, validation, stable order, duplicate suppression, atomic import, balance/chat/receipt isolation, restart and activation guard")
 '''
 
 
