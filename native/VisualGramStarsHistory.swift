@@ -1,7 +1,18 @@
 import Foundation
+import CryptoKit
 import Postbox
 
 public extension VisualGramLocalAppearance {
+    // A synthetic namespace keeps demo identifiers separate from server-issued receipts.
+    static func demoStarsTopUpId(accountId: EnginePeer.Id, entryId: String) -> String {
+        let seed = Data("duckgram.demo.stars-top-up.v1:\(accountId.toInt64()):\(entryId)".utf8)
+        let opaque = Data(SHA512.hash(data: seed)).base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
+        return "dgst" + String(opaque.prefix(60))
+    }
+
     func starsHistoryTransactions(accountId: EnginePeer.Id, mode: StarsTransactionsContext.Mode, peers: [Int64: EnginePeer], ton: Bool = false) -> [StarsContext.State.Transaction] {
         let value = self.appearance(accountId: accountId)
         let currency: VisualGramBalanceHistory = ton ? .grams : .stars
@@ -17,12 +28,14 @@ public extension VisualGramLocalAppearance {
             if entry.kind == .adjustment, entry.title == VisualGramGift.StarsTransaction.upgradeTitle, case .unique = entry.gift {
                 flags.insert(.isStarGiftUpgrade)
             }
+            let isDemoStarsTopUp = !ton && entry.kind == .topUp && entry.amount > 0 && entry.peerId == nil && entry.gift == nil
             let peer: StarsContext.State.Transaction.Peer
-            if let id = entry.peerId, let resolved = peers[id] { peer = .peer(resolved) }
+            if isDemoStarsTopUp { peer = .fragment }
+            else if let id = entry.peerId, let resolved = peers[id] { peer = .peer(resolved) }
             else if entry.gift != nil || entry.kind == .adjustment, let own = peers[accountId.toInt64()] { peer = .peer(own) }
             else { peer = .premiumBot }
             return StarsContext.State.Transaction(
-                flags: flags, id: (ton ? "vg-grams:" : "vg-stars:") + entry.id,
+                flags: flags, id: isDemoStarsTopUp ? Self.demoStarsTopUpId(accountId: accountId, entryId: entry.id) : (ton ? "vg-grams:" : "vg-stars:") + entry.id,
                 count: CurrencyAmount(amount: StarsAmount(value: max(-Int64.max, entry.amount), nanos: 0), currency: ton ? .ton : .stars),
                 date: entry.date, peer: peer, title: entry.title ?? (entry.kind == .adjustment && entry.amount < 0 ? (ton ? "Списание GRAM" : "Списание звёзд") : nil), description: entry.comment, photo: nil,
                 transactionDate: entry.date, transactionUrl: nil, paidMessageId: nil, giveawayMessageId: nil,

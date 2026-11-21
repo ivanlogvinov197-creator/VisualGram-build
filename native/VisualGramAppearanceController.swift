@@ -866,6 +866,7 @@ func visualGramAppearanceController(context: AccountContext) -> ViewController {
         if activeSection == -1 { add(1000, -2, "Доступ", .button("Проверить")) }
         add(7, -1, "Выбор профиля", .button(actions.targetTitle))
         if activeSection == -1 {
+            add(904, -1, "Демонстрационный режим: созданные здесь балансы, подарки и операции не являются реальными покупками или переводами Telegram и Fragment.", .info)
             add(900, 0, "Профиль", .button("")); add(901, 0, "Подарки", .button("")); add(902, 0, "Балансы", .button(""))
             add(40, 1, "Очистить всё оформление", .destructive)
         } else {
