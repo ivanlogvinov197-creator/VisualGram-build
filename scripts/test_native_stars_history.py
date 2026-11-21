@@ -18,6 +18,7 @@ def source():
 
 STUBS = r'''
 import Foundation
+import CryptoKit
 public typealias MessageTextEntity = Int
 public struct EnginePeer: Equatable {
     public struct Id: Hashable { public let value: Int64; public init(_ value: Int64) { self.value = value }; public func toInt64() -> Int64 { value } }
@@ -30,7 +31,7 @@ public enum StarsTransactionsContext { public enum Mode { case all, incoming, ou
 public enum StarsContext { public enum State {
     public struct Transaction {
         public struct Flags: OptionSet { public var rawValue: Int32; public init(rawValue: Int32) { self.rawValue = rawValue }; public static let isStarGiftResale = Flags(rawValue: 512); static let isStarGiftUpgrade = Flags(rawValue: 2) }
-        public enum Peer: Equatable { case peer(EnginePeer), premiumBot }
+        public enum Peer: Equatable { case peer(EnginePeer), premiumBot, fragment }
         public let flags: Flags; public let id: String; public let count: CurrencyAmount; public let date: Int32; public let peer: Peer; public let title: String?; public let starGift: StarGift?
         public init(flags: Flags, id: String, count: CurrencyAmount, date: Int32, peer: Peer, title: String?, description: Any?, photo: Any?, transactionDate: Any?, transactionUrl: Any?, paidMessageId: Any?, giveawayMessageId: Any?, media: [Int], subscriptionPeriod: Any?, starGift: StarGift?, floodskipNumber: Any?, starrefCommissionPermille: Any?, starrefPeerId: Any?, starrefAmount: Any?, paidMessageCount: Any?, premiumGiftMonths: Any?, adsProceedsFromDate: Any?, adsProceedsToDate: Any?) {
             self.flags = flags; self.id = id; self.count = count; self.date = date; self.peer = peer; self.title = title; self.starGift = starGift
@@ -73,12 +74,33 @@ assert(all.map { $0.count.amount.value }.reduce(0, +) == 100)
 assert(Set(all.map { $0.id }).count == 4 && all[1].id == "vg-stars:transfer")
 assert(all[1].peer == .peer(EnginePeer(id: b)) && !all[1].flags.contains(.isStarGiftResale))
 assert(all[2].flags.contains(.isStarGiftResale) && all[0].flags.contains(.isStarGiftResale))
+let topUp = all[3]
+assert(topUp.peer == .fragment, "demo Stars top-up did not use the native Fragment presentation")
+assert(topUp.title == nil && topUp.starGift == nil && topUp.count.currency == .stars)
+assert(topUp.id.count == 64 && topUp.id.hasPrefix("dgst"))
+assert(topUp.id.allSatisfy { "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-".contains($0) })
+assert(topUp.id == store.starsHistoryTransactions(accountId:a,mode:.incoming,peers:peers).last?.id, "display ID changed between filters")
+assert(topUp.id == VisualGramLocalAppearance.demoStarsTopUpId(accountId:a,entryId:"topup"))
+assert(topUp.id != VisualGramLocalAppearance.demoStarsTopUpId(accountId:b,entryId:"topup"), "ID leaked across accounts")
+assert(topUp.id != VisualGramLocalAppearance.demoStarsTopUpId(accountId:a,entryId:"different"))
 assert(store.starsHistoryTransactions(accountId: a, mode: .incoming, peers: peers).map { $0.count.amount.value } == [75, 100])
 assert(store.starsHistoryTransactions(accountId: a, mode: .outgoing, peers: peers).map { $0.count.amount.value } == [-25, -50])
 assert(store.starsHistoryTransactions(accountId: b, mode: .all, peers: peers).isEmpty)
 let encoded = try JSONEncoder().encode(history)
 let decoded = try JSONDecoder().decode([VisualGramGift.StarsTransaction].self, from: encoded)
 assert(decoded == history)
+store.values[10]?.starsHistory = decoded
+assert(store.starsHistoryTransactions(accountId:a,mode:.all,peers:peers).last?.id == topUp.id, "ID changed after history reload")
+store.values[10]?.gramHistory = [history[0]]
+let gramTopUp = store.starsHistoryTransactions(accountId:a,mode:.all,peers:peers,ton:true).first!
+assert(gramTopUp.peer == .premiumBot && gramTopUp.id == "vg-grams:topup" && gramTopUp.count.currency == .ton)
+store.values[10]?.starsHistory = [
+    .init(id:"gifted",date:600,amount:50,kind:.topUp,title:nil,peerId:20,gift:nil),
+    .init(id:"deduct",date:601,amount:-50,kind:.adjustment,title:nil,peerId:nil,gift:nil)
+]
+let otherOperations=store.starsHistoryTransactions(accountId:a,mode:.all,peers:peers)
+assert(otherOperations.first?.peer == .peer(EnginePeer(id:a)))
+assert(otherOperations.last?.peer == .peer(EnginePeer(id:b)) && otherOperations.last?.id == "vg-stars:gifted", "peer gift was relabelled as a Fragment purchase")
 print("PASS: triple Chats tap/reset/timeout, Stars history native amounts, dates, peers, resale/transfer distinction, mode filters, account isolation and persistence")
 '''
 
