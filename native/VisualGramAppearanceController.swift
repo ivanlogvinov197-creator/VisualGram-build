@@ -63,9 +63,11 @@ private final class VisualGramAppearanceActions {
     private var direction: VisualGramGift.Direction = .received
     private var giftDate = Int32(Date().timeIntervalSince1970)
     private var giftText = ""
+    private let collectionImportDisposable = MetaDisposable()
+    private var collectionImportToken: UUID?
 
     init(context: AccountContext) { self.context = context; self.targetPeerId = context.account.peerId }
-    deinit { self.disposables.dispose() }
+    deinit { self.collectionImportDisposable.dispose(); self.disposables.dispose() }
 
     var appearance: VisualGramAppearance { return VisualGramLocalAppearance.shared.appearance(accountId: self.context.account.peerId, targetPeerId: self.targetPeerId) }
     private var scheduledGifts: [VisualGramScheduledGift] {
@@ -144,7 +146,7 @@ private final class VisualGramAppearanceActions {
         self.presentNative(alert)
     }
 
-    func form(title: String, fields: [(String, String)], save: @escaping ([String]) -> Void) {
+    func form(title: String, fields: [(String, String)], actionTitle: String = "Сохранить", save: @escaping ([String]) -> Void) {
         let alert = UIAlertController(title: title, message: nil, preferredStyle: .alert)
         for (placeholder, value) in fields {
             alert.addTextField { field in
@@ -155,7 +157,7 @@ private final class VisualGramAppearanceActions {
             }
         }
         alert.addAction(UIAlertAction(title: "Отмена", style: .cancel))
-        alert.addAction(UIAlertAction(title: "Сохранить", style: .default, handler: { [weak alert] _ in
+        alert.addAction(UIAlertAction(title: actionTitle, style: .default, handler: { [weak alert] _ in
             save(alert?.textFields?.map { $0.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "" } ?? [])
         }))
         self.presentNative(alert)
@@ -204,6 +206,7 @@ private final class VisualGramAppearanceActions {
             self.giftDate = Int32(Date().timeIntervalSince1970)
             self.giftText = ""
             self.importUniqueGift()
+        case 25: self.copyPublicCollection()
         case 14:
             self.controller?.push(UserAppearanceScreen(context: self.context, visualGramTarget: self.targetPeerId))
         case 15:
@@ -511,6 +514,80 @@ private final class VisualGramAppearanceActions {
                     }
                 }
             }, error: { [weak self] _ in self?.message("Не удалось загрузить все подарки. Проверь ссылки и подключение; ни один подарок не добавлен.") }))
+        }
+    }
+
+    private func copyPublicCollection() {
+        guard self.collectionImportToken == nil else { self.message("Коллекция уже загружается."); return }
+        self.form(title: "Скопировать коллекцию NFT", fields: [("@юзернейм владельца коллекции", "")], actionTitle: "Загрузить") { [weak self] values in
+            guard let self, let input = values.first, let name = VisualGramCollectionImport.username(from: input) else {
+                self?.message("Введи корректный @юзернейм."); return
+            }
+            guard self.collectionImportToken == nil else { return }
+            let token = UUID()
+            let target = self.targetPeerId
+            self.collectionImportToken = token
+            let resolve = self.context.engine.peers.resolvePeerByName(name: name, referrer: nil)
+            |> filter { if case .result = $0 { return true }; return false }
+            |> map { result -> EnginePeer? in
+                guard case let .result(peer) = result, let peer, case .user = peer else { return nil }
+                return peer
+            }
+            |> take(1)
+            |> timeout(20.0, queue: .mainQueue(), alternate: .single(nil))
+            |> deliverOnMainQueue
+            self.disposables.add(resolve.start(next: { [weak self] peer in
+                guard let self, self.collectionImportToken == token else { return }
+                guard self.targetPeerId == target, let peer else {
+                    self.collectionImportToken = nil
+                    self.message("Пользователь не найден или выбран другой профиль."); return
+                }
+                guard peer.id != target else {
+                    self.collectionImportToken = nil
+                    self.message("Подарки этого профиля уже отображаются в нём."); return
+                }
+                let progress = UIAlertController(title: "Загрузка коллекции", message: "@\(name)\nЗагружаются публичные NFT-подарки…", preferredStyle: .alert)
+                progress.addAction(UIAlertAction(title: "Отмена", style: .cancel, handler: { [weak self] _ in
+                    guard let self, self.collectionImportToken == token else { return }
+                    self.collectionImportToken = nil
+                    self.collectionImportDisposable.set(nil)
+                }))
+                self.presentNative(progress)
+                let finish: ([VisualGramCollectionImport.Item]?, VisualGramCollectionImport.ImportError?) -> Void = { [weak self, weak progress] items, error in
+                    guard let self, self.collectionImportToken == token else { return }
+                    progress?.dismiss(animated: true, completion: { [weak self] in
+                        guard let self, self.collectionImportToken == token else { return }
+                        guard self.targetPeerId == target, VisualGramActivation.shared.hasAccess else { self.collectionImportToken = nil; return }
+                        guard let items else {
+                            self.collectionImportToken = nil
+                            switch error {
+                            case .tooLarge: self.message("Коллекция слишком большая для одного копирования. Ничего не добавлено.")
+                            case .unavailable: self.message("Публичная коллекция недоступна. Ничего не добавлено.")
+                            default: self.message("Не удалось загрузить коллекцию полностью. Проверь подключение и попробуй снова. Ничего не добавлено.")
+                            }
+                            return
+                        }
+                        guard !items.isEmpty else { self.collectionImportToken = nil; self.message("В профиле нет доступных публичных NFT-подарков."); return }
+                        let confirm = UIAlertController(title: "Добавить коллекцию?", message: "@\(name): \(items.count) NFT. Они будут добавлены в «\(self.targetTitle)». Текущие подарки сохранятся, совпадающие NFT будут пропущены.", preferredStyle: .alert)
+                        confirm.addAction(UIAlertAction(title: "Отмена", style: .cancel, handler: { [weak self] _ in
+                            if self?.collectionImportToken == token { self?.collectionImportToken = nil }
+                        }))
+                        confirm.addAction(UIAlertAction(title: "Добавить", style: .default, handler: { [weak self] _ in
+                            guard let self, self.collectionImportToken == token else { return }
+                            self.collectionImportToken = nil
+                            guard self.targetPeerId == target else { self.message("Профиль изменился. Загрузи коллекцию заново."); return }
+                            guard let count = VisualGramLocalAppearance.shared.importPublicCollection(accountId: self.context.account.peerId, targetPeerId: target, items: items) else {
+                                self.message("Не удалось сохранить коллекцию. Проверь доступ и попробуй снова."); return
+                            }
+                            self.message(count == 0 ? "Все NFT из этой коллекции уже добавлены." : "Добавлено NFT: \(count). Пропущено повторов: \(items.count - count).")
+                        }))
+                        self.presentNative(confirm)
+                    })
+                }
+                self.collectionImportDisposable.set((VisualGramCollectionImport.load(account: self.context.account, peerId: peer.id)
+                |> timeout(90.0, queue: .mainQueue(), alternate: .fail(.network))
+                |> deliverOnMainQueue).start(next: { finish($0, nil) }, error: { finish(nil, $0) }))
+            }))
         }
     }
 
@@ -884,6 +961,7 @@ func visualGramAppearanceController(context: AccountContext) -> ViewController {
                 add(15, 2, "Часы работы", .button("")); add(16, 2, "Адрес", .button(""))
             case 1:
                 add(24, 0, "Добавить NFT", .button("")); add(20, 0, "Добавить обычный подарок", .button(""))
+                add(25, 0, "Скопировать коллекцию NFT", .button(""))
                 add(23, 1, "Отправить NFT", .button("")); add(22, 1, "Отправить обычный подарок", .button(""))
                 add(27, 2, "Мои подарки", .button("")); add(26, 2, "История операций", .button(""))
             default:
