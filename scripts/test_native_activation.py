@@ -13,8 +13,10 @@ def policy_source():
     return policy + r'''
 let key = Curve25519.Signing.PrivateKey()
 let publicKey = key.publicKey.rawRepresentation
-func envelope(_ status: String = "trial", lease: Int = 300, time: Int64 = 1000, until: Int64 = 2000) -> (Data,Data) {
-    let payload = try! JSONSerialization.data(withJSONObject: ["v":1,"device":"device","request":"request","server_time":time,"trial_until":until,"status":status,"lease_seconds":lease])
+func envelope(_ status: String = "trial", lease: Int = 300, time: Int64 = 1000, until: Int64 = 2000, licenseUntil: Int64? = nil) -> (Data,Data) {
+    var fields: [String: Any] = ["v":1,"device":"device","request":"request","server_time":time,"trial_until":until,"status":status,"lease_seconds":lease]
+    if let licenseUntil { fields["license_until"] = licenseUntil }
+    let payload = try! JSONSerialization.data(withJSONObject: fields)
     return (payload,try! key.signature(for:payload))
 }
 func verify(_ data: (Data,Data), device: String = "device", request: String = "request") -> VisualGramActivationGrant? {
@@ -47,6 +49,21 @@ assert(verify(envelope("expired",lease:1))==nil)
 assert(verify(envelope("unknown"))==nil)
 assert(!verify(envelope("expired",lease:0))!.permitsAccess(startUptime:100,uptime:100))
 assert(verify(envelope("active",time:999999,until:1))!.permitsAccess(startUptime:100,uptime:200))
+assert(grant.statusText(startUptime:100,uptime:100) == "Пробный доступ\nОсталось 16 мин")
+let permanent = verify(envelope("active"))!
+assert(permanent.statusText(startUptime:100,uptime:100) == "Доступ активен.")
+let temporary = verify(envelope("active", until:1, licenseUntil:1000 + 187800))!
+assert(temporary.statusText(startUptime:100,uptime:100) == "Временный доступ\nОсталось 2 д 4 ч 10 мин")
+assert(temporary.statusText(startUptime:100,uptime:160) == "Временный доступ\nОсталось 2 д 4 ч 9 мин")
+assert(temporary.statusText(startUptime:100,uptime:400) == "Нужна проверка доступа.")
+assert(temporary.statusText(startUptime:100,uptime:99) == "Нужна проверка доступа.")
+let almostExpired = verify(envelope("active", lease:59, licenseUntil:1059))!
+assert(almostExpired.statusText(startUptime:100,uptime:158) == "Временный доступ\nОсталось меньше минуты")
+assert(almostExpired.statusText(startUptime:100,uptime:159) == "Срок доступа истёк.")
+assert(verify(envelope("active", licenseUntil:1000)) == nil)
+assert(verify(envelope("active", licenseUntil:1299)) == nil)
+assert(verify(envelope(licenseUntil:2000)) == nil)
+assert(verify(envelope("expired", lease:0, licenseUntil:2000)) == nil)
 assert(VisualGramActivationGrant.verify(payload:valid.0,signature:valid.1,publicKey:Curve25519.Signing.PrivateKey().publicKey.rawRepresentation,device:"device",request:"request")==nil)
 let vaultId = String(repeating: "a", count: 32)
 let vaultKey = Data(repeating: 7, count: 32)
@@ -78,14 +95,19 @@ print("PASS: signed grant, device/request binding, expiry, monotonic clock, inva
 def store_source():
     source = delivery.source().split(delivery.CHECKS)[0]
     actual = (ROOT/'native/VisualGramLocalAppearance.swift').read_text(encoding='utf-8')
-    update = actual[actual.index('    func updateValues('):actual.index('    public func reset(')]
+    update = actual[actual.index('    @discardableResult\n    func updateValues('):actual.index('    public func reset(')]
     snapshot = actual[actual.index('    private var vaultKey:'):actual.index('    private init()')]
     cipher = (ROOT/'native/VisualGramActivation.swift').read_text(encoding='utf-8')
     cipher = cipher[cipher.index('enum VisualGramAppearanceCipher'):cipher.index('private final class VisualGramActivationSessionDelegate')]
     source = 'import CryptoKit\n' + cipher + source
     source = source.replace('    private var vaultKey: Data? = Data(repeating: 7, count: 32)\n', '')
     purchase_safety = actual[actual.index('    public func blocksExpiredPurchase('):actual.index('    public var pendingScheduledGifts:')]
-    stub = '    func updateValues(recordOperations: Bool = true, allowWhileLocked: Bool = false, _ change: (inout [String: VisualGramAppearance]) -> Void) { change(&values) }'
+    stub = '''    @discardableResult
+    func updateValues(recordOperations: Bool = true, allowWhileLocked: Bool = false, _ change: (inout [String: VisualGramAppearance]) -> Void) -> Bool {
+        guard VisualGramActivation.shared.hasAccess else { return false }
+        change(&values)
+        return true
+    }'''
     source = source.replace(stub, '''    private var revisionValue: Int32 = 0
     private let revision = ActivationTestPromise()
     static func recordGiftOperations(previous: [String: VisualGramAppearance], values: inout [String: VisualGramAppearance]) {}

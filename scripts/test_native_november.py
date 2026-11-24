@@ -16,7 +16,10 @@ def source():
     craft = '\n'.join(line for line in craft.splitlines() if not line.startswith('import '))
     chat = (root / 'native/VisualGramChatGifts.swift').read_text(encoding='utf-8')
     preview_peers = chat[chat.index('func visualGramChatPreviewPeerIds(accountId: EnginePeer.Id, profiles:'):chat.index('// These messages')]
-    return base + '\n' + 'public enum CraftStarGiftError { case generic, unavailable, craftFailed, tooEarly(Int32) }\n' + wallet + '\n' + craft + '\n' + preview_peers + CHECKS
+    paid_stars = (root / 'native/VisualGramPaidStars.swift').read_text(encoding='utf-8')
+    paid_message = paid_stars[paid_stars.index('struct VisualGramPaidChatMessage:'):paid_stars.index('public enum VisualGramStarsSpendResult:')]
+    base = base.replace('    var stars: Int64?', '    var paidChatMessages: [String: [VisualGramPaidChatMessage]]?\n    var stars: Int64?')
+    return base + '\n' + paid_message + 'public enum CraftStarGiftError { case generic, unavailable, craftFailed, tooEarly(Int32) }\n' + wallet + '\n' + craft + '\n' + preview_peers + CHECKS
 
 
 CHECKS = r'''

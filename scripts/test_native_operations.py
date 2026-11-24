@@ -15,7 +15,7 @@ def source():
     cipher=cipher[cipher.index('enum VisualGramAppearanceCipher'):cipher.index('private final class VisualGramActivationSessionDelegate')]
     base='import CryptoKit\n'+cipher+base
     persistence=actual[actual.index('    private func writeProtectedValues('):actual.index('    private func restoreProtectedValues(')]
-    update=actual[actual.index('    func updateValues('):actual.index('    public func reset(')]
+    update=actual[actual.index('    @discardableResult\n    func updateValues('):actual.index('    public func reset(')]
     old='    func updateValues(recordOperations: Bool = true, _ change: (inout [String: VisualGramAppearance]) -> Void) { let hook = beforeUpdate; beforeUpdate = nil; hook?(); change(&values) }'
     assert old in base
     base=base.replace(old,'''    private let lock = NSLock()
@@ -25,7 +25,7 @@ def source():
     private let revision = OperationTestPromise()
 '''+persistence+update)
     old='    func update(accountId: EnginePeer.Id, targetPeerId: EnginePeer.Id? = nil, _ change: (inout VisualGramAppearance) -> Void) { let key = String((targetPeerId ?? accountId).toInt64()); var value = values[key] ?? VisualGramAppearance(); change(&value); values[key] = value }'
-    actual_update=actual[actual.index('    public func update(accountId:'):actual.index('    func updateValues(')]
+    actual_update=actual[actual.index('    public func update(accountId:'):actual.index('    @discardableResult\n    func updateValues(')]
     assert old in base;base=base.replace(old,actual_update)
     management=(root/'native/VisualGramGiftManagement.swift').read_text(encoding='utf-8')
     upgrade=management[management.index('    func upgradeLocalGift('):management.index('    static func makeUpgradedGift(')]

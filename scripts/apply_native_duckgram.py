@@ -98,30 +98,47 @@ def apply_duckgram(root):
 ''')
 
     root_controller = ui / 'Sources/TelegramRootController.swift'
-    replace(root_controller, 'import TelegramPresentationData\n', 'import TelegramPresentationData\nimport PresentationDataUtils\n')
-    replace(root_controller, '    override public func containerLayoutUpdated(', '''    override public func viewDidAppear(_ animated: Bool) {
+    replace(root_controller, 'import TelegramPresentationData\n', 'import TelegramPresentationData\nimport TooltipUI\n')
+    replace(root_controller, '    private var visualGramChatsTaps = VisualGramTabTapCounter()\n', '''    private var visualGramChatsTaps = VisualGramTabTapCounter()
+    // Preserve the one-time flag for users who already saw the welcome prompt.
+    private static let duckGramMenuTipSeenKey = "DuckGram.didShowWelcome.v1"
+    private weak var duckGramMenuTip: TooltipScreen?
+''')
+    replace(root_controller, '    override public func containerLayoutUpdated(', r'''    override public func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         VisualGramActivation.shared.start(vendorIdentifier: UIDevice.current.identifierForVendor?.uuidString, isForeground: UIApplication.shared.applicationState != .background, activeNotification: UIApplication.didBecomeActiveNotification, backgroundNotification: UIApplication.didEnterBackgroundNotification)
         Queue.mainQueue().async { [weak self] in
-            guard let self, self.viewIfLoaded?.window != nil, self.presentedViewController == nil,
-                  UIApplication.shared.applicationState != .background,
-                  let window = self.context.sharedContext.mainWindow else { return }
             let defaults = UserDefaults.standard
-            let welcomeKey = "DuckGram.didShowWelcome.v1"
-            guard !defaults.bool(forKey: welcomeKey) else { return }
-            let alert = textAlertController(
-                context: self.context,
-                title: "Добро пожаловать в DuckGram",
-                text: "Трижды нажми на вкладку «Чаты», чтобы открыть меню оформления.",
-                actions: [TextAlertAction(type: .defaultAction, title: "Понятно", action: {})]
+            guard !defaults.bool(forKey: Self.duckGramMenuTipSeenKey),
+                  let self, self.presentedViewController == nil,
+                  UIApplication.shared.applicationState != .background,
+                  let tabs = self.rootTabController, self.topViewController === tabs,
+                  tabs.viewIfLoaded?.window != nil, let chats = self.chatListController,
+                  let frame = tabs.frameForControllerTab(controller: chats), !frame.isEmpty else { return }
+            let anchor = CGRect(x: frame.midX, y: frame.minY - 8.0, width: 0.0, height: 0.0)
+            let chatsTitle = self.presentationData.strings.DialogList_Title
+            let tip = TooltipScreen(
+                account: self.context.account,
+                sharedContext: self.context.sharedContext,
+                text: .plain(text: "Быстро нажми «\(chatsTitle)» три раза подряд, чтобы открыть меню DuckGram."),
+                location: .point(anchor, .bottom),
+                displayDuration: .custom(12.0),
+                shouldDismissOnTouch: { point, bubble in
+                    if frame.contains(point) { return .ignore }
+                    return .dismiss(consume: bubble.contains(point))
+                }
             )
-            // NavigationController.present(_:animated:) traps; use Telegram's window overlay.
-            defaults.set(true, forKey: welcomeKey)
-            window.present(alert, on: .root)
+            self.duckGramMenuTip = tip
+            defaults.set(true, forKey: Self.duckGramMenuTipSeenKey)
+            tabs.present(tip, in: .current)
         }
     }
 
     override public func containerLayoutUpdated(''')
+    replace(root_controller, '            self.pushViewController(visualGramAppearanceController(context: self.context))\n', '''            UserDefaults.standard.set(true, forKey: Self.duckGramMenuTipSeenKey)
+            self.duckGramMenuTip?.dismiss()
+            self.pushViewController(visualGramAppearanceController(context: self.context))
+''')
 
     account = sub / 'AccountContext/Sources/AccountContext.swift'
     replace(account, '        case gift(StarGift.UniqueGift)\n        case invalidSlug', '        case gift(StarGift.UniqueGift)\n        case duckGramGift(EnginePeer.Id, ProfileGiftsContext.State.StarGift)\n        case invalidSlug')

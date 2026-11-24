@@ -14,19 +14,28 @@ def source():
     appearance_model = appearance[appearance.index("public struct VisualGramPremiumGift:"):appearance.index("/// Local presentation data.")]
     reset = appearance[appearance.index("    public func reset("):appearance.index("    public func displayPeer(")]
     migration = appearance[appearance.index("    static func migrateLegacyAppearances("):appearance.index("    public var changes:")]
-    access = appearance[appearance.index("    public func appearance("):appearance.index("    func updateValues(")]
+    access = appearance[appearance.index("    public func appearance("):appearance.index("    @discardableResult\n    func updateValues(")]
     dispatch = appearance[appearance.index("    public var pendingScheduledGifts:"):appearance.index("    public func appearance(")]
     gift_model = appearance[appearance.index("public struct VisualGramGift:"):appearance.index("    public func displayGift(")] + "}\n"
     collection = (root / "native/VisualGramCollectionImport.swift").read_text(encoding="utf-8")
     collection_model = collection[collection.index("public enum VisualGramCollectionImport"):collection.index("    // NETWORK:")] + "}\n"
     collection_methods = collection[collection.index("    @discardableResult\n    static func appendPublicCollection"):]
     collection_support = management[management.index("    static func orderedOwnedGifts("):management.index("    static func recordGiftOperations(")]
-    return ENGINE_STUBS + STUBS + gift_model + model + appearance_model + collection_model + STORE + migration + dispatch + access + reset + "}\npublic extension VisualGramLocalAppearance {\n" + collection_support + methods + collection_methods + CHECKS + COLLECTION_CHECKS
+    paid_stars = (root / "native/VisualGramPaidStars.swift").read_text(encoding="utf-8")
+    paid_message = paid_stars[paid_stars.index("struct VisualGramPaidChatMessage:"):paid_stars.index("public enum VisualGramStarsSpendResult:")]
+    channels = (root / "native/VisualGramChannels.swift").read_text(encoding="utf-8")
+    channel_model = channels[channels.index("public struct VisualGramChannelProperties:"):channels.index("/// Channel copies live")]
+    return ENGINE_STUBS + STUBS + gift_model + model + paid_message + channel_model + appearance_model + collection_model + STORE + migration + dispatch + access + reset + "}\npublic extension VisualGramLocalAppearance {\n" + collection_support + methods + collection_methods + CHECKS + COLLECTION_CHECKS
 
 
 STUBS = r'''
 import Foundation
-public typealias VisualGramUsername = Int
+public struct VisualGramUsername: Codable, Equatable {
+    public var name: String
+    public var purchaseDate: Int32
+    public var tonAmount: Int64
+    public var usdAmount: Int64
+}
 public struct PeerVerification: Codable, Equatable {
     public let botId: Int64
     public let iconFileId: Int64
@@ -50,7 +59,12 @@ public final class VisualGramLocalAppearance {
     private let defaults = UserDefaults(suiteName: UUID().uuidString)!
     private var vaultKey: Data? = Data(repeating: 7, count: 32)
     var values: [String: VisualGramAppearance] = [:]
-    func updateValues(recordOperations: Bool = true, allowWhileLocked: Bool = false, _ change: (inout [String: VisualGramAppearance]) -> Void) { change(&values) }
+    @discardableResult
+    func updateValues(recordOperations: Bool = true, allowWhileLocked: Bool = false, _ change: (inout [String: VisualGramAppearance]) -> Void) -> Bool {
+        guard VisualGramActivation.shared.hasAccess else { return false }
+        change(&values)
+        return true
+    }
 '''
 
 CHECKS = r'''
@@ -75,7 +89,7 @@ store.update(accountId: own) {
     $0.premium = true
     $0.stars = 123
     $0.grams = 456
-    $0.usernames = [1]
+    $0.usernames = [.init(name: "fixture_user", purchaseDate: 0, tonAmount: 0, usdAmount: 0)]
     $0.giftOperationHistory = [gift]
     $0.gramCardPlacements = [:]
 }
@@ -214,7 +228,7 @@ let collectionOffset3 = try pages.append([], nextOffset: "page3")
 assert(collectionOffset3 == "page3", "a filtered page prevented loading later gifts")
 let collectionEnd = try pages.append([collectionItem("collectible-1"), publicB], nextOffset: "")
 assert(collectionEnd == nil)
-assert(pages.items.map { $0.gift.slug } == ["Collectible-1", "Collectible-2"], "pagination changed order or duplicated NFT")
+assert(pages.items.map { $0.sourceKey } == ["unique:collectible-1", "unique:collectible-2"], "pagination changed order or duplicated NFT")
 do { _ = try pages.append([], nextOffset: "page2"); assertionFailure("repeated offset accepted") }
 catch VisualGramCollectionImport.ImportError.invalidPagination {} catch { assertionFailure("unexpected page error") }
 var limited = VisualGramCollectionImport.Pages(maxItems: 1)
@@ -244,7 +258,16 @@ VisualGramActivation.shared.hasAccess = false
 assert(collectionStore.importPublicCollection(accountId: own, targetPeerId: own, items: [collectionItem("Locked-1")]) == nil)
 VisualGramActivation.shared.hasAccess = true
 assert(collectionStore.appearance(accountId: own) == imported, "locked import changed saved data")
-print("PASS: public NFT collection pagination, validation, stable order, duplicate suppression, atomic import, balance/chat/receipt isolation, restart and activation guard")
+let ordinaryA = VisualGramCollectionImport.Item(gift: ordinary, date: 10, sourceKey: "owner:11")
+let ordinaryB = VisualGramCollectionImport.Item(gift: ordinary, date: 10, sourceKey: "owner:12")
+let ordinaryCount = collectionStore.importPublicCollection(accountId: own, targetPeerId: own, items: [ordinaryA, ordinaryB, ordinaryA])
+assert(ordinaryCount == 2, "distinct copies of the same ordinary gift were collapsed")
+assert(collectionStore.importPublicCollection(accountId: own, targetPeerId: own, items: [ordinaryB, ordinaryA]) == 0)
+let normalGifts = collectionStore.appearance(accountId: own).gifts.suffix(2)
+assert(Set(normalGifts.map { $0.identifier }).count == 2 && normalGifts.allSatisfy { $0.gift == ordinary })
+assert(collectionStore.importPublicUsernames(accountId: own, targetPeerId: own, names: ["PublicName", "publicname", "ExistingName"], existingNames: ["existingname"], now: 100) == 1)
+assert(collectionStore.appearance(accountId: own).usernames.map { $0.name } == ["PublicName"])
+print("PASS: public gift collection pagination, validation, stable order, duplicate suppression, atomic import, balance/chat/receipt isolation, restart and activation guard")
 '''
 
 

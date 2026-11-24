@@ -29,7 +29,7 @@ def apply_stars_history(root, project):
         }
 ''')
     appearance = root / 'submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/VisualGramAppearanceController.swift'
-    replace(appearance, 'func visualGramAppearanceController(context: AccountContext) -> ViewController {', 'public func visualGramAppearanceController(context: AccountContext) -> ViewController {')
+    replace(appearance, 'func visualGramAppearanceController(', 'public func visualGramAppearanceController(')
 
     stars = core / 'TelegramEngine/Payments/Stars.swift'
     text = stars.read_text(encoding='utf-8')
