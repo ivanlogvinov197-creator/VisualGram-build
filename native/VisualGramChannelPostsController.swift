@@ -209,7 +209,7 @@ private final class VisualGramChannelPostsActions {
             let right = ItemListNavigationButton(
                 content: .text(current == nil ? "Опубликовать" : "Сохранить"), style: .bold,
                 enabled: available && !textToSave.isEmpty && textToSave.utf16.count <= visualGramChannelPostLimit,
-                action: { [weak actions] in actions?.save(textToSave, postId: current?.id) }
+                action: { [weak postActions = actions] in postActions?.save(textToSave, postId: current?.id) }
             )
             let presentationData = ItemListPresentationData(presentation)
             let state = ItemListControllerState(
