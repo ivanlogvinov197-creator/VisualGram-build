@@ -65,12 +65,16 @@ jobs:
           xcrun swiftc -frontend -parse telegram-native/submodules/TelegramUI/Components/Gifts/GiftStoreScreen/Sources/GiftStoreScreen.swift telegram-native/submodules/TelegramUI/Components/Gifts/GiftStoreScreen/Sources/BalanceComponent.swift
           xcrun swiftc -frontend -parse telegram-native/submodules/TelegramStringFormatting/Sources/ServiceMessageStrings.swift telegram-native/submodules/TelegramUI/Components/Stars/StarsBalanceOverlayComponent/Sources/StarsBalanceOverlayComponent.swift
           python3 scripts/test_native_delivery.py
+          python3 scripts/test_native_collection_import.py
           python3 scripts/test_native_upgrade.py
           python3 scripts/test_native_trading.py
           python3 scripts/test_native_gift_flow.py
           python3 scripts/test_native_stars_history.py
+          python3 scripts/test_native_paid_stars.py
           python3 scripts/test_native_november.py
           python3 scripts/test_native_activation.py
+          python3 scripts/test_native_local_accounts.py
+          python3 scripts/test_native_channels.py
           python3 scripts/test_native_operations.py
           python3 scripts/validate_patched_swift.py telegram-native
           xcrun swiftc -frontend -parse telegram-native/submodules/TelegramUI/Sources/TelegramRootController.swift telegram-native/submodules/TabBarUI/Sources/TabBarController.swift telegram-native/submodules/Display/Source/ViewController.swift telegram-native/submodules/TelegramCore/Sources/TelegramEngine/Payments/Stars.swift telegram-native/submodules/TelegramUI/Components/Stars/StarsTransactionsScreen/Sources/StarsTransactionsScreen.swift
