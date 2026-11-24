@@ -272,8 +272,8 @@ public func visualGramChannelPostsController(context: AccountContext, sourcePeer
         let presentationData = ItemListPresentationData(presentation)
         let copy = actions.copy
         let settings = copy.map { _ in
-            ItemListNavigationButton(content: .text("Настройки"), style: .regular, enabled: true, action: { [weak actions] in
-                actions?.openSettings()
+            ItemListNavigationButton(content: .text("Настройки"), style: .regular, enabled: true, action: { [weak settingsActions = actions] in
+                settingsActions?.openSettings()
             })
         }
         let state = ItemListControllerState(
