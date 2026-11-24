@@ -22,13 +22,16 @@ private enum VisualGramGuide {
     static let topics: [(title: String, text: String)] = [
         ("Начало работы и выбор профиля", """
         Как открыть меню
-        Три раза подряд нажми на вкладку «Чаты». В главном меню находятся «Профиль», «Подарки», «Балансы», «Гайд», проверка доступа и очистка оформления.
+        Три раза подряд нажми на вкладку «Чаты». В главном меню находятся «Профиль», «Подарки», «Балансы», «Каналы», «Гайд», проверка доступа и очистка оформления.
+
+        «Каналы»
+        Укажи @юзернейм или ID канала, чтобы задать количество подписчиков или открыть копию канала. В копии можно писать посты и менять настройки. Копии и посты хранятся на этом устройстве.
 
         «Выбор профиля»
         Введи @юзернейм или ID человека, чей профиль хочешь оформить в этом клиенте. Все следующие изменения применяются к выбранному профилю. Чтобы вернуться к своему, открой выбор профиля, очисти поле и сохрани.
 
-        «Доступ» / «Активация DuckGram»
-        Здесь можно проверить состояние доступа, обновить проверку, ввести код и открыть бота покупки доступа. Для проверки нужен интернет. Гайд доступен и без активации.
+        «Активация»
+        Здесь виден срок временного доступа. Можно ввести код, проверить доступ или открыть бота покупки.
 
         Что видят другие
         Меню визуала работает в демонстрационном режиме. Созданные здесь подарки, балансы, операции и изменения профилей видны в этом клиенте. Они не создают настоящие покупки, переводы, владение NFT или Premium на серверах Telegram. Настоящие платежи Telegram — отдельные действия.
@@ -62,12 +65,12 @@ private enum VisualGramGuide {
 
         Это визуальное оформление получения и отправки внутри клиента. Оно не отправляет настоящий подарок от имени другого человека и не меняет его аккаунт.
         """),
-        ("NFT и копирование коллекции", """
+        ("NFT и копирование подарков", """
         «Добавить NFT»
         Вставь ссылку t.me/nft/… или slug вида PlushPepe-1. Можно добавить до 100 ссылок за раз, разделив пробелами или переносами строк. Приложение загрузит модели, фоны и узоры, затем предложит получение сейчас или позже. Для одного NFT нужно также подтвердить предпросмотр; для нескольких действие применяется к набору после выбора времени. Если хотя бы одна ссылка не загрузилась, набор не добавляется.
 
-        «Скопировать коллекцию NFT»
-        Введи @юзернейм владельца публичной коллекции, нажми «Загрузить», дождись количества найденных NFT и подтверди «Добавить». Копируются доступные публичные NFT в выбранный визуальный профиль. Текущие подарки сохраняются, совпадающие NFT пропускаются. Номер, юзернеймы, имя, фото и баланс владельца не копируются. Отмена загрузки ничего не добавляет.
+        «Скопировать подарки»
+        Введи @юзернейм владельца публичной коллекции, нажми «Загрузить», дождись количества найденных подарков и подтверди «Добавить». Копируются доступные публичные обычные и NFT-подарки в выбранный визуальный профиль. Текущие подарки сохраняются, уже скопированные экземпляры пропускаются. Номер, юзернеймы, имя, фото и баланс владельца не копируются. Отмена загрузки ничего не добавляет.
 
         Для загрузки NFT и коллекций нужен интернет. Скрытые подарки чужого профиля недоступны. Копирование коллекции не создаёт сообщения о покупке или передаче подарков и не является настоящим переходом владения.
         """),
@@ -104,6 +107,8 @@ private enum VisualGramGuide {
         «Верификация» — настройка дополнительного значка: доступные варианты и источник выбираются в открывшемся окне. Можно выключить его.
 
         «Добавить NFT-юзернейм» — добавляет визуальную запись юзернейма с ценой и датой. Не регистрирует и не передаёт настоящий юзернейм. «Юзернеймы» открывает список для изменения, удаления и порядка.
+
+        «Скопировать юзернеймы» — загружает публичные активные юзернеймы указанного пользователя в выбранный визуальный профиль. Совпадения пропускаются. Цены и даты покупки Telegram не сообщает, дату добавления можно изменить через список юзернеймов.
 
         «Номер профиля» — настройка отображаемого номера. Для коллекционного +888 можно задать цену и дату. Пустое поле убирает настройку. Номер для входа в Telegram не меняется.
 
@@ -158,7 +163,7 @@ private enum VisualGramGuide {
         Визуальные изменения отображаются только в этом клиенте. Для настоящего подарка нужна обычная покупка или передача через Telegram.
 
         Доступ закончился
-        Открой «Доступ» или «Активация DuckGram», проверь соединение и код. Блокировка доступа не означает очистку сохранённого оформления. Гайд остаётся доступным.
+        Открой «Активация» и проверь соединение или введи код. Сохранённое оформление остаётся на устройстве.
         """)
     ]
 }
@@ -197,6 +202,7 @@ private struct VisualGramAppearanceEntry: ItemListNodeEntry {
 
 private final class VisualGramAppearanceActions {
     let context: AccountContext
+    let openLocalAccounts: (() -> Void)?
     weak var controller: ItemListController?
     let disposables = DisposableSet()
     let activeSection = ValuePromise<Int32>(-1, ignoreRepeated: true)
@@ -211,7 +217,11 @@ private final class VisualGramAppearanceActions {
     private let collectionImportDisposable = MetaDisposable()
     private var collectionImportToken: UUID?
 
-    init(context: AccountContext) { self.context = context; self.targetPeerId = context.account.peerId }
+    init(context: AccountContext, openLocalAccounts: (() -> Void)?) {
+        self.context = context
+        self.openLocalAccounts = openLocalAccounts
+        self.targetPeerId = context.account.peerId
+    }
     deinit { self.collectionImportDisposable.dispose(); self.disposables.dispose() }
 
     var appearance: VisualGramAppearance { return VisualGramLocalAppearance.shared.appearance(accountId: self.context.account.peerId, targetPeerId: self.targetPeerId) }
@@ -263,20 +273,13 @@ private final class VisualGramAppearanceActions {
 
     func openActivation() {
         let activation = VisualGramActivation.shared
-        let alert = UIAlertController(title: "Доступ к DuckGram", message: activation.statusText + "\n\nПробный период — 24 часа. Код активирует доступ на одном устройстве. Для проверки нужен интернет. Настройки сохраняются при блокировке.", preferredStyle: .alert)
+        let alert = UIAlertController(title: "Активация", message: activation.statusText, preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "Закрыть", style: .cancel))
-        alert.addAction(UIAlertAction(title: "Купить доступ в боте", style: .default, handler: { [weak self] _ in
-            guard let self, let controller = self.controller else { return }
-            self.context.sharedContext.openExternalUrl(context: self.context, urlContext: .generic, url: "https://t.me/duckkgrambot", forceExternal: false, presentationData: self.context.sharedContext.currentPresentationData.with { $0 }, navigationController: controller.navigationController as? NavigationController, dismissInput: {})
-        }))
-        alert.addAction(UIAlertAction(title: "Проверить доступ", style: .default, handler: { [weak self] _ in
-            activation.refresh { [weak self] error in self?.message(error ?? activation.statusText) }
-        }))
-        alert.addAction(UIAlertAction(title: "Ввести код", style: .default, handler: { [weak self] _ in
+        let enterCode = UIAlertAction(title: "Ввести код", style: .default, handler: { [weak self] _ in
             guard let self = self else { return }
-            let input = UIAlertController(title: "Код активации", message: "Код будет привязан к этому устройству.", preferredStyle: .alert)
+            let input = UIAlertController(title: "Код активации", message: nil, preferredStyle: .alert)
             input.addTextField { field in
-                field.placeholder = "XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX"
+                field.placeholder = "Вставьте код"
                 field.autocapitalizationType = .allCharacters
                 field.autocorrectionType = .no
                 field.spellCheckingType = .no
@@ -287,6 +290,15 @@ private final class VisualGramAppearanceActions {
                 activation.refresh(code: code) { [weak self] error in self?.message(error ?? activation.statusText) }
             }))
             self.presentNative(input)
+        })
+        alert.addAction(enterCode)
+        if !activation.hasAccess { alert.preferredAction = enterCode }
+        alert.addAction(UIAlertAction(title: "Проверить", style: .default, handler: { [weak self] _ in
+            activation.refresh { [weak self] error in self?.message(error ?? activation.statusText) }
+        }))
+        alert.addAction(UIAlertAction(title: "Купить доступ", style: .default, handler: { [weak self] _ in
+            guard let self, let controller = self.controller else { return }
+            self.context.sharedContext.openExternalUrl(context: self.context, urlContext: .generic, url: "https://t.me/duckkgrambot", forceExternal: false, presentationData: self.context.sharedContext.currentPresentationData.with { $0 }, navigationController: controller.navigationController as? NavigationController, dismissInput: {})
         }))
         self.presentNative(alert)
     }
@@ -324,12 +336,14 @@ private final class VisualGramAppearanceActions {
 
     func open(_ id: Int32) {
         if id == 905 { self.showGuide(); return }
+        if id == 906 { self.openLocalAccounts?(); return }
         if (910..<(910 + Int32(VisualGramGuide.topics.count))).contains(id) { self.showGuide(topic: Int(id - 910)); return }
         if id == 1000 { self.openActivation(); return }
         guard VisualGramActivation.shared.hasAccess else { self.openActivation(); return }
         if (900...902).contains(id) { self.activeSection.set(id - 900); return }
 
         switch id {
+        case 907: self.controller?.push(visualGramChannelsMenuController(context: self.context))
         case 3: self.configureVerification()
         case 4: self.selectEmoji()
         case 5:
@@ -340,6 +354,7 @@ private final class VisualGramAppearanceActions {
         case 11: self.editPhone()
         case 12: self.editRating()
         case 13: self.openUsernames()
+        case 17: self.copyPublicUsernames()
         case 26: self.openGiftList(history: true)
         case 20:
             self.direction = .received; self.counterpartyId = nil; self.giftDate = Int32(clamping: Int64(Date().timeIntervalSince1970)); self.giftText = ""
@@ -685,9 +700,66 @@ private final class VisualGramAppearanceActions {
         }
     }
 
+    private func copyPublicUsernames() {
+        self.form(title: "Скопировать юзернеймы", fields: [("@юзернейм владельца", "")], actionTitle: "Загрузить") { [weak self] values in
+            guard let self, let input = values.first, let name = VisualGramCollectionImport.username(from: input) else {
+                self?.message("Введи корректный @юзернейм.")
+                return
+            }
+            let target = self.targetPeerId
+            let resolve = self.context.engine.peers.resolvePeerByName(name: name, referrer: nil)
+            |> filter { if case .result = $0 { return true }; return false }
+            |> map { result -> EnginePeer? in
+                guard case let .result(peer) = result, let peer, case .user = peer else { return nil }
+                return peer
+            }
+            |> take(1)
+            |> timeout(20.0, queue: .mainQueue(), alternate: .single(nil))
+            |> deliverOnMainQueue
+            self.disposables.add(resolve.start(next: { [weak self] source in
+                guard let self, self.targetPeerId == target else { return }
+                guard case let .user(user) = source else {
+                    self.message("Пользователь не найден. Проверь юзернейм и подключение.")
+                    return
+                }
+                var names = user.usernames.filter { $0.flags.contains(.isActive) }.map { $0.username }
+                if let primary = user.username, !primary.isEmpty,
+                   !names.contains(where: { $0.lowercased() == primary.lowercased() }) {
+                    names.insert(primary, at: 0)
+                }
+                guard !names.isEmpty else { self.message("У пользователя нет публичных юзернеймов."); return }
+                let sourceNames = names
+                let confirm = UIAlertController(title: "Скопировать юзернеймы?",
+                    message: sourceNames.map { "@" + $0 }.joined(separator: "\n") + "\n\nБудут добавлены в «\(self.targetTitle)». Уже добавленные юзернеймы пропускаются.",
+                    preferredStyle: .alert)
+                confirm.addAction(UIAlertAction(title: "Отмена", style: .cancel))
+                confirm.addAction(UIAlertAction(title: "Добавить", style: .default, handler: { [weak self] _ in
+                    guard let self, self.targetPeerId == target else { return }
+                    let _ = (self.context.engine.data.get(TelegramEngine.EngineData.Item.Peer.Peer(id: target))
+                    |> deliverOnMainQueue).startStandalone(next: { [weak self] targetUser in
+                        guard let self, self.targetPeerId == target, VisualGramActivation.shared.hasAccess else { return }
+                        var existing: [String] = []
+                        if case let .user(user) = targetUser {
+                            existing = user.usernames.map { $0.username }
+                            if let primary = user.username { existing.append(primary) }
+                        }
+                        guard let added = VisualGramLocalAppearance.shared.importPublicUsernames(
+                            accountId: self.context.account.peerId, targetPeerId: target, names: sourceNames,
+                            existingNames: existing, now: Int32(clamping: Int64(Date().timeIntervalSince1970))) else {
+                            self.message("Не удалось сохранить юзернеймы. Проверь доступ и попробуй снова.")
+                            return
+                        }
+                        self.message(added == 0 ? "Все юзернеймы уже добавлены." : "Добавлено юзернеймов: \(added).")
+                    })
+                }))
+                self.presentNative(confirm)
+            }))
+        }
+    }
+
     private func copyPublicCollection() {
         guard self.collectionImportToken == nil else { self.message("Коллекция уже загружается."); return }
-        self.form(title: "Скопировать коллекцию NFT", fields: [("@юзернейм владельца коллекции", "")], actionTitle: "Загрузить") { [weak self] values in
+        self.form(title: "Скопировать подарки", fields: [("@юзернейм владельца коллекции", "")], actionTitle: "Загрузить") { [weak self] values in
             guard let self, let input = values.first, let name = VisualGramCollectionImport.username(from: input) else {
                 self?.message("Введи корректный @юзернейм."); return
             }
@@ -714,7 +786,7 @@ private final class VisualGramAppearanceActions {
                     self.collectionImportToken = nil
                     self.message("Подарки этого профиля уже отображаются в нём."); return
                 }
-                let progress = UIAlertController(title: "Загрузка коллекции", message: "@\(name)\nЗагружаются публичные NFT-подарки…", preferredStyle: .alert)
+                let progress = UIAlertController(title: "Загрузка коллекции", message: "@\(name)\nЗагружаются публичные подарки…", preferredStyle: .alert)
                 progress.addAction(UIAlertAction(title: "Отмена", style: .cancel, handler: { [weak self] _ in
                     guard let self, self.collectionImportToken == token else { return }
                     self.collectionImportToken = nil
@@ -735,8 +807,8 @@ private final class VisualGramAppearanceActions {
                             }
                             return
                         }
-                        guard !items.isEmpty else { self.collectionImportToken = nil; self.message("В профиле нет доступных публичных NFT-подарков."); return }
-                        let confirm = UIAlertController(title: "Добавить коллекцию?", message: "@\(name): \(items.count) NFT. Они будут добавлены в «\(self.targetTitle)». Текущие подарки сохранятся, совпадающие NFT будут пропущены.", preferredStyle: .alert)
+                        guard !items.isEmpty else { self.collectionImportToken = nil; self.message("В профиле нет доступных публичных подарков."); return }
+                        let confirm = UIAlertController(title: "Добавить коллекцию?", message: "@\(name): \(items.count) подарков. Они будут добавлены в «\(self.targetTitle)». Текущие подарки сохранятся, уже скопированные экземпляры будут пропущены.", preferredStyle: .alert)
                         confirm.addAction(UIAlertAction(title: "Отмена", style: .cancel, handler: { [weak self] _ in
                             if self?.collectionImportToken == token { self?.collectionImportToken = nil }
                         }))
@@ -747,7 +819,7 @@ private final class VisualGramAppearanceActions {
                             guard let count = VisualGramLocalAppearance.shared.importPublicCollection(accountId: self.context.account.peerId, targetPeerId: target, items: items) else {
                                 self.message("Не удалось сохранить коллекцию. Проверь доступ и попробуй снова."); return
                             }
-                            self.message(count == 0 ? "Все NFT из этой коллекции уже добавлены." : "Добавлено NFT: \(count). Пропущено повторов: \(items.count - count).")
+                            self.message(count == 0 ? "Все подарки из этой коллекции уже добавлены." : "Добавлено подарков: \(count). Пропущено повторов: \(items.count - count).")
                         }))
                         self.presentNative(confirm)
                     })
@@ -1091,9 +1163,9 @@ private final class VisualGramAppearanceActions {
 
 }
 
-func visualGramAppearanceController(context: AccountContext) -> ViewController {
+func visualGramAppearanceController(context: AccountContext, openLocalAccounts: (() -> Void)? = nil) -> ViewController {
     VisualGramActivation.shared.start(vendorIdentifier: UIDevice.current.identifierForVendor?.uuidString, isForeground: UIApplication.shared.applicationState != .background, activeNotification: UIApplication.didBecomeActiveNotification, backgroundNotification: UIApplication.didEnterBackgroundNotification)
-    let actions = VisualGramAppearanceActions(context: context)
+    let actions = VisualGramAppearanceActions(context: context, openLocalAccounts: openLocalAccounts)
     let signal = combineLatest(context.sharedContext.presentationData, VisualGramLocalAppearance.shared.changes, actions.expandedLists.get(), actions.activeSection.get())
     |> deliverOnMainQueue
     |> map { presentationData, _, _, activeSection -> (ItemListControllerState, (ItemListNodeState, Any)) in
@@ -1105,15 +1177,18 @@ func visualGramAppearanceController(context: AccountContext) -> ViewController {
         if let warning = VisualGramLocalAppearance.shared.protectedStorageWarning {
             add(1001, -3, warning, .info)
         }
-        if activeSection == -1 { add(905, 0, "Гайд", .button("")) }
-        if !VisualGramActivation.shared.hasAccess {
-            add(1000, 0, "Активация DuckGram", .button("Введите код"))
-        } else {
-        if activeSection == -1 { add(1000, -2, "Доступ", .button("Проверить")) }
+        if activeSection == -1 {
+            add(905, 0, "Гайд", .button(""))
+            if actions.openLocalAccounts != nil { add(906, 0, "Локальные аккаунты +888", .button("")) }
+        }
+        let hasAccess = VisualGramActivation.shared.hasAccess
+        if activeSection == -1 || !hasAccess { add(1000, hasAccess ? -2 : 0, "Активация", .button("")) }
+        if hasAccess {
         add(7, -1, "Выбор профиля", .button(actions.targetTitle))
         if activeSection == -1 {
             add(904, -1, "Демонстрационный режим: созданные здесь балансы, подарки и операции не являются реальными покупками или переводами Telegram и Fragment.", .info)
             add(900, 0, "Профиль", .button("")); add(901, 0, "Подарки", .button("")); add(902, 0, "Балансы", .button(""))
+            add(907, 0, "Каналы", .button(""))
             add(40, 1, "Очистить всё оформление", .destructive)
         } else {
             add(903, -1, "Назад", .button(""))
@@ -1126,11 +1201,12 @@ func visualGramAppearanceController(context: AccountContext) -> ViewController {
                 add(11, 1, "Номер профиля", .button(value.phoneNumber.map { "+" + $0.name } ?? ""))
                 add(12, 1, "Уровень", .button(value.starRating.map { String($0.level) } ?? "Настоящий"))
                 add(13, 1, "Юзернеймы", .button(String(value.usernames.count)))
+                add(17, 1, "Скопировать юзернеймы", .button(""))
                 add(14, 2, "Цвета и фон профиля", .button(""))
                 add(15, 2, "Часы работы", .button("")); add(16, 2, "Адрес", .button(""))
             case 1:
                 add(24, 0, "Добавить NFT", .button("")); add(20, 0, "Добавить обычный подарок", .button(""))
-                add(25, 0, "Скопировать коллекцию NFT", .button(""))
+                add(25, 0, "Скопировать подарки", .button(""))
                 add(23, 1, "Отправить NFT", .button("")); add(22, 1, "Отправить обычный подарок", .button(""))
                 add(27, 2, "Мои подарки", .button("")); add(26, 2, "История операций", .button(""))
             default:

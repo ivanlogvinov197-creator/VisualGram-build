@@ -117,6 +117,7 @@ public struct VisualGramGift: Codable, Equatable {
     public var pinnedToTop: Bool?
     public var collectionIds: [Int32]?
     public var localIdentifier: String?
+    public var collectionSourceKey: String?
     public var hidesOriginalInfo: Bool?
     public var isHistoryOnly: Bool?
     public var isTransferred: Bool?
@@ -236,6 +237,10 @@ public struct VisualGramAppearance: Codable, Equatable {
     public var starRating: TelegramStarRating?
     public var pendingStarRating: TelegramStarPendingRating?
     public var hiddenChatGifts: [String: Set<String>]?
+    var paidChatMessages: [String: [VisualGramPaidChatMessage]]?
+    var paidPostReactions: [String: Int32]?
+    var paidReactionPrivacy: [String: Int64]?
+    var visualChannels: [String: VisualGramChannelRecord]?
 
     public init() {
     }
@@ -474,21 +479,23 @@ public final class VisualGramLocalAppearance {
         }
     }
 
-    func updateValues(recordOperations: Bool = true, allowWhileLocked: Bool = false, _ transform: (inout [String: VisualGramAppearance]) -> Void) {
+    @discardableResult
+    func updateValues(recordOperations: Bool = true, allowWhileLocked: Bool = false, _ transform: (inout [String: VisualGramAppearance]) -> Void) -> Bool {
         self.lock.lock()
-        guard allowWhileLocked || VisualGramActivation.shared.authorizesAppearance() else { self.lock.unlock(); return }
-        guard self.vaultKey != nil else { self.lock.unlock(); return }
+        guard allowWhileLocked || VisualGramActivation.shared.authorizesAppearance() else { self.lock.unlock(); return false }
+        guard self.vaultKey != nil else { self.lock.unlock(); return false }
         let previous = self.values
         var candidate = previous
         transform(&candidate)
         if recordOperations { Self.recordGiftOperations(previous: previous, values: &candidate) }
-        guard self.writeProtectedValues(candidate) else { self.lock.unlock(); return }
+        guard self.writeProtectedValues(candidate) else { self.lock.unlock(); return false }
         self.values = candidate
         self.revisionValue &+= 1
         let revision = self.revisionValue
         self.lock.unlock()
         // Avoid rebuilding a visible native screen from inside its own action.
         Queue.mainQueue().async { self.revision.set(revision) }
+        return true
     }
 
     public func reset(accountId: EnginePeer.Id, targetPeerId: EnginePeer.Id? = nil) {
@@ -500,12 +507,14 @@ public final class VisualGramLocalAppearance {
             }
             let remaining = values[targetKey]?.scheduledGifts ?? []
             let hiddenChatGifts = values[targetKey]?.hiddenChatGifts
-            if remaining.isEmpty && hiddenChatGifts == nil {
+            let visualChannels = values[targetKey]?.visualChannels
+            if remaining.isEmpty && hiddenChatGifts == nil && visualChannels == nil {
                 values.removeValue(forKey: targetKey)
             } else {
                 var cleared = VisualGramAppearance()
                 cleared.scheduledGifts = remaining.isEmpty ? nil : remaining
                 cleared.hiddenChatGifts = hiddenChatGifts
+                cleared.visualChannels = visualChannels
                 values[targetKey] = cleared
             }
         }
@@ -570,6 +579,11 @@ public final class VisualGramLocalAppearance {
                 }
                 for transfer in appearance.gramHistory ?? [] where transfer.kind == .transfer && transfer.peerId == other {
                     include(transfer.id, key: transfer.id)
+                }
+                if !reversed {
+                    for message in appearance.paidChatMessages?[String(other)] ?? [] where messageId == nil || messageId == message.messageId {
+                        keys.insert(message.id)
+                    }
                 }
             }
             collect(from: account, other: peer, reversed: false)

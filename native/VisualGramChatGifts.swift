@@ -14,6 +14,9 @@ func visualGramChatPreviewPeerIds(accountId: EnginePeer.Id, profiles: [String: V
             ids.formUnion(profile.gifts.compactMap(\.counterpartyId))
             ids.formUnion((profile.premiumGifts ?? []).map(\.recipientId))
             ids.formUnion((profile.gramHistory ?? []).filter { $0.kind == .transfer }.compactMap(\.peerId))
+            if let chats = profile.paidChatMessages {
+                ids.formUnion(chats.keys.compactMap { Int64($0) })
+            }
         } else if profile.gifts.contains(where: { $0.counterpartyId == account })
                     || (profile.premiumGifts ?? []).contains(where: { $0.recipientId == account }) {
             ids.insert(peer)
@@ -43,9 +46,10 @@ public func visualGramChatGiftMessages(accountPeerId ownId: EnginePeer.Id, peer:
         return (fromTimestamp.map { date >= $0 } ?? true) && (throughTimestamp.map { date <= $0 } ?? true)
     }
 
-    func appendGift(identifier: String, date: Int32, version: UInt32, incoming: Bool, author: Peer?, action: TelegramMediaActionType, attributes: [MessageAttribute] = []) {
+    func appendMessage(identifier: String, date: Int32, version: UInt32, incoming: Bool, author: Peer?, action: TelegramMediaActionType? = nil, attributes: [MessageAttribute] = [], text: String = "", messageId: Int32? = nil) {
         let hash = VisualGramLocalAppearance.chatGiftHash(identifier)
-        let message = Message(stableId: UInt32.max - 10000 - (hash % 100_000_000), stableVersion: version, id: MessageId(peerId: peerId, namespace: Int32.max - 42, id: -Int32(hash & 0x3fffffff) - 1), globallyUniqueId: nil, groupingKey: nil, groupInfo: nil, threadId: nil, timestamp: date, flags: incoming ? [.Incoming] : [], tags: [], globalTags: [], localTags: [], customTags: [], forwardInfo: nil, author: author, text: "", attributes: attributes, media: [TelegramMediaAction(action: action)], peers: peers, associatedMessages: SimpleDictionary<MessageId, Message>(), associatedMessageIds: [], associatedMedia: [:], associatedThreadInfo: nil, associatedStories: [:])
+        let media: [Media] = action.map { [TelegramMediaAction(action: $0)] } ?? []
+        let message = Message(stableId: UInt32.max - 10000 - (hash % 100_000_000), stableVersion: version, id: MessageId(peerId: peerId, namespace: Int32.max - 42, id: messageId ?? (-Int32(hash & 0x3fffffff) - 1)), globallyUniqueId: nil, groupingKey: nil, groupInfo: nil, threadId: nil, timestamp: date, flags: incoming ? [.Incoming] : [], tags: [], globalTags: [], localTags: [], customTags: [], forwardInfo: nil, author: author, text: text, attributes: attributes, media: media, peers: peers, associatedMessages: SimpleDictionary<MessageId, Message>(), associatedMessageIds: [], associatedMedia: [:], associatedThreadInfo: nil, associatedStories: [:])
         result.append(EngineMessage(message))
     }
 
@@ -72,14 +76,21 @@ public func visualGramChatGiftMessages(accountPeerId ownId: EnginePeer.Id, peer:
         }
         let purchaseAuthor = local.purchaseBuyerId.flatMap { peers[EnginePeer.Id($0)] }
         let attributes: [MessageAttribute] = (local.purchaseStars ?? local.purchaseGrams).map { _ in [VisualGramGiftPurchaseAttribute(stars: local.purchaseStars ?? 0, grams: local.purchaseGrams)] } ?? []
-        appendGift(identifier: local.identifier, date: local.date, version: version, incoming: incoming, author: purchaseAuthor ?? (incoming ? chatPeer : ownPeer), action: action, attributes: attributes)
+        appendMessage(identifier: local.identifier, date: local.date, version: version, incoming: incoming, author: purchaseAuthor ?? (incoming ? chatPeer : ownPeer), action: action, attributes: attributes)
     }
     let appearance = VisualGramLocalAppearance.shared.appearance(accountId: ownId)
     if appearance.enabled {
         for transfer in appearance.gramHistory ?? [] where transfer.kind == .transfer && transfer.peerId == peerId.toInt64() && includesDate(transfer.date) {
             guard transfer.amount != 0, transfer.amount != Int64.min, !hidden.contains(transfer.id) else { continue }
             let incoming = transfer.amount > 0
-            appendGift(identifier: transfer.id, date: transfer.date, version: 0, incoming: incoming, author: incoming ? chatPeer : ownPeer, action: .gramTransfer(amount: abs(transfer.amount), peerAddress: VisualGramLocalAppearance.visualWalletAddress(peerId: chatPeer.id), transactionId: transfer.id, comment: transfer.comment, commentEncrypted: false))
+            appendMessage(identifier: transfer.id, date: transfer.date, version: 0, incoming: incoming, author: incoming ? chatPeer : ownPeer, action: .gramTransfer(amount: abs(transfer.amount), peerAddress: VisualGramLocalAppearance.visualWalletAddress(peerId: chatPeer.id), transactionId: transfer.id, comment: transfer.comment, commentEncrypted: false))
+        }
+        for message in appearance.paidChatMessages?[String(peerId.toInt64())] ?? [] where includesDate(message.date) && !hidden.contains(message.id) {
+            let label = "\n\nВизуальное сообщение DuckGram"
+            let start = message.text.utf16.count + 2
+            let labelEntity = MessageTextEntity(range: start ..< message.text.utf16.count + label.utf16.count, type: .Italic)
+            let attributes = TextEntitiesMessageAttribute(entities: message.entities + [labelEntity])
+            appendMessage(identifier: message.id, date: message.date, version: 0, incoming: false, author: ownPeer, attributes: [attributes], text: message.text + label, messageId: message.messageId)
         }
     }
     if peerId != ownId {
@@ -90,7 +101,7 @@ public func visualGramChatGiftMessages(accountPeerId ownId: EnginePeer.Id, peer:
                 guard !hidden.contains(gift.id) else { continue }
                 guard gift.months > 0, gift.months <= Int32.max / 30 else { continue }
                 let action = TelegramMediaActionType.giftPremium(currency: "XTR", amount: gift.stars, days: gift.months * 30, cryptoCurrency: nil, cryptoAmount: nil, text: gift.text.isEmpty ? nil : gift.text, entities: gift.entities)
-                appendGift(identifier: gift.id, date: gift.date, version: 0, incoming: incoming, author: incoming ? chatPeer : ownPeer, action: action)
+                appendMessage(identifier: gift.id, date: gift.date, version: 0, incoming: incoming, author: incoming ? chatPeer : ownPeer, action: action)
             }
         }
     }

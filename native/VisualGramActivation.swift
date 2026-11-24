@@ -102,6 +102,7 @@ struct VisualGramActivationGrant: Codable {
     let trial_until: Int64
     let status: String
     let lease_seconds: Int
+    var license_until: Int64? = nil
     var storage_id: String? = nil
     var storage_key: String? = nil
 
@@ -118,6 +119,10 @@ struct VisualGramActivationGrant: Codable {
             guard grant.server_time < grant.trial_until,
                   Int64(grant.lease_seconds) <= grant.trial_until - grant.server_time else { return nil }
         } else if grant.status == "expired" && grant.lease_seconds != 0 { return nil }
+        if let until = grant.license_until {
+            guard grant.status == "active", until > grant.server_time,
+                  Int64(grant.lease_seconds) <= until - grant.server_time else { return nil }
+        }
         return grant
     }
 
@@ -125,6 +130,30 @@ struct VisualGramActivationGrant: Codable {
         guard status == "trial" || status == "active", lease_seconds > 0,
               uptime.isFinite, startUptime.isFinite, uptime >= startUptime else { return false }
         return uptime - startUptime < Double(lease_seconds)
+    }
+
+    func statusText(startUptime: TimeInterval, uptime: TimeInterval) -> String {
+        if self.status == "expired" { return "Срок доступа истёк." }
+        let isTrial = self.status == "trial"
+        let end = isTrial ? self.trial_until : self.license_until
+        let elapsed = uptime - startUptime
+        let remaining = end.map { Double($0 - self.server_time) - elapsed }
+        if elapsed.isFinite, elapsed >= 0, let remaining, remaining <= 0 {
+            return "Срок доступа истёк."
+        }
+        guard self.permitsAccess(startUptime: startUptime, uptime: uptime) else {
+            return "Нужна проверка доступа."
+        }
+        guard let remaining else { return "Доступ активен." }
+        let minutes = Int64(remaining / 60)
+        let days = minutes / 1440
+        let hours = minutes / 60 % 24
+        let parts = [(days, "д"), (hours, "ч"), (minutes % 60, "мин")].compactMap { count, unit in
+            count > 0 ? "\(count) \(unit)" : nil
+        }
+        let duration = parts.isEmpty ? "меньше минуты" : parts.joined(separator: " ")
+        let title = isTrial ? "Пробный доступ" : "Временный доступ"
+        return "\(title)\nОсталось \(duration)"
     }
 }
 
@@ -137,7 +166,7 @@ public final class VisualGramActivation {
     private var grant: VisualGramActivationGrant?
     private var signedAccess: VisualGramSignedAccess?
     private var grantUptime: TimeInterval = 0
-    private var message = "Для проверки доступа подключитесь к интернету."
+    private var message = "Подключитесь к интернету."
     private var started = false
     private var foreground = false
     private var reportedAccess = false
@@ -184,13 +213,7 @@ public final class VisualGramActivation {
     public var statusText: String {
         self.lock.lock(); defer { self.lock.unlock() }
         guard let grant = self.grant else { return self.message }
-        guard grant.permitsAccess(startUptime: self.grantUptime, uptime: ProcessInfo.processInfo.systemUptime) else {
-            return grant.status == "expired" ? "Срок доступа истёк. Введите код активации." : "Требуется проверка доступа через интернет."
-        }
-        if grant.status == "active" { return "Доступ активирован для этого устройства." }
-        let elapsed = max(0, ProcessInfo.processInfo.systemUptime - self.grantUptime)
-        let remaining = max(0, Double(grant.trial_until - grant.server_time) - elapsed)
-        return "Пробный доступ: осталось \(Int(remaining) / 3600) ч \((Int(remaining) % 3600) / 60) мин."
+        return grant.statusText(startUptime: self.grantUptime, uptime: ProcessInfo.processInfo.systemUptime)
     }
 
     public func start(vendorIdentifier: String?, isForeground: Bool, activeNotification: Notification.Name, backgroundNotification: Notification.Name) {
