@@ -5,6 +5,8 @@ import re
 import subprocess
 import sys
 
+from test_native_paid_stars import validate_compose_capture
+
 
 def validate_launch_presentation(root):
     path = Path(root) / 'submodules/TelegramUI/Sources/TelegramRootController.swift'
@@ -17,6 +19,7 @@ def validate_launch_presentation(root):
 def validate(root):
     root = Path(root).resolve()
     validate_launch_presentation(root)
+    validate_compose_capture(root)
     changed = subprocess.check_output(['git', '-C', str(root), 'diff', '--name-only', 'HEAD', '--', '*.swift'], text=True).splitlines()
     added = subprocess.check_output(['git', '-C', str(root), 'ls-files', '--others', '--exclude-standard', '--', '*.swift'], text=True).splitlines()
     files = sorted(set(changed + added))

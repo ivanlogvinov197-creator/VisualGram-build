@@ -4,6 +4,139 @@ import subprocess
 import tempfile
 
 
+def compose_capture_source(root):
+    composer = (Path(root) / "submodules/TelegramUI/Sources/ChatControllerNode.swift").read_text(encoding="utf-8")
+    start = "        self.textInputPanelNode?.sendMessage = {"
+    end = "\n        self.textInputPanelNode?.paste = {"
+    if composer.count(start) != 1 or composer.count(end) != 1:
+        raise ValueError("Unsupported layout for the chat composer send action")
+    handler = composer[composer.index(start):composer.index(end)]
+    return COMPOSER_STUBS + handler + COMPOSER_CHECKS
+
+
+def validate_compose_capture(root):
+    sdk = subprocess.check_output(["xcrun", "--sdk", "iphoneos", "--show-sdk-path"], text=True).strip()
+    compiler = ["xcrun", "swiftc", "-swift-version", "5", "-warnings-as-errors"]
+    with tempfile.TemporaryDirectory(prefix="duckgram-paid-compose-") as folder:
+        swift = Path(folder) / "PaidCompose.swift"
+        executable = Path(folder) / "paid-compose"
+        swift.write_text(compose_capture_source(root), encoding="utf-8")
+        subprocess.run([*compiler, "-target", "arm64-apple-ios15.0", "-sdk", sdk, "-typecheck", str(swift)], check=True)
+        subprocess.run([*compiler, str(swift), "-o", str(executable)], check=True)
+        subprocess.run([str(executable)], check=True)
+
+
+COMPOSER_STUBS = r'''
+import Foundation
+
+final class InputPanel {
+    var sendMessage: (() -> Void)?
+}
+
+final class ChatController {
+    var chargedCounts: [Int32] = []
+    var confirm: ((Bool) -> Void)?
+    func presentPaidMessageAlertIfNeeded(count: Int32, completion: @escaping (Bool) -> Void) {
+        self.chargedCounts.append(count)
+        self.confirm = completion
+    }
+}
+
+final class InterfaceState {
+    enum Subject { case scheduledMessages }
+    var subject: Subject?
+    var editMessageState: Int?
+    var sendPaidMessageStars: Int?
+    var interfaceState = Draft()
+
+    struct Draft {
+        var forwardMessageIds: [Int]?
+        var effectiveInputState = Input()
+    }
+
+    struct Input {
+        var inputText = NSAttributedString(string: "draft")
+        var isEmpty: Bool { self.inputText.length == 0 }
+    }
+}
+
+final class ChatControllerNode {
+    weak var controller: ChatController?
+    let textInputPanelNode: InputPanel? = InputPanel()
+    let chatPresentationInterfaceState = InterfaceState()
+    let controllerInteraction = Interaction()
+    var afterEphemeralCheck: (() -> Void)?
+    var telegramChoice: (() -> Void)?
+    var offersVisualSending = false
+    var sent: [Bool] = []
+
+    final class Interaction {
+        var scheduled = false
+        func scheduleCurrentMessage(_ value: Int?) { self.scheduled = true }
+    }
+
+    func maybeSendEphemeralMessage(sendNormally: @escaping () -> Void) {
+        self.afterEphemeralCheck = sendNormally
+    }
+
+    func presentVisualGramPaidMessageChoice(sendWithTelegram: @escaping () -> Void) -> Bool {
+        guard self.offersVisualSending else { return false }
+        self.telegramChoice = sendWithTelegram
+        return true
+    }
+
+    func sendCurrentMessage(postpone: Bool = false) { self.sent.append(postpone) }
+
+    func installSendAction() {
+'''
+
+COMPOSER_CHECKS = r'''
+    }
+}
+
+let composer = ChatControllerNode()
+let controller = ChatController()
+composer.controller = controller
+composer.installSendAction()
+composer.chatPresentationInterfaceState.subject = .scheduledMessages
+composer.textInputPanelNode?.sendMessage?()
+precondition(composer.controllerInteraction.scheduled && composer.afterEphemeralCheck == nil)
+composer.chatPresentationInterfaceState.subject = nil
+
+composer.textInputPanelNode?.sendMessage?()
+composer.afterEphemeralCheck?()
+precondition(composer.sent == [false] && controller.chargedCounts.isEmpty)
+
+composer.chatPresentationInterfaceState.sendPaidMessageStars = 5
+composer.chatPresentationInterfaceState.interfaceState.forwardMessageIds = [1, 2]
+composer.textInputPanelNode?.sendMessage?()
+composer.afterEphemeralCheck?()
+precondition(controller.chargedCounts == [3] && composer.sent == [false])
+controller.confirm?(true)
+precondition(composer.sent == [false, true])
+
+composer.offersVisualSending = true
+composer.chatPresentationInterfaceState.interfaceState.forwardMessageIds = nil
+composer.textInputPanelNode?.sendMessage?()
+composer.afterEphemeralCheck?()
+precondition(controller.chargedCounts == [3])
+composer.telegramChoice?()
+precondition(controller.chargedCounts == [3, 1])
+controller.confirm?(false)
+precondition(composer.sent == [false, true, false])
+
+var departing: ChatController? = ChatController()
+weak var released = departing
+composer.controller = departing
+composer.textInputPanelNode?.sendMessage?()
+departing = nil
+precondition(released == nil)
+composer.afterEphemeralCheck?()
+precondition(composer.sent == [false, true, false])
+print("PASS: paid chat composer Swift capture ownership, fallback and controller lifetime")
+'''
+
+
 def source():
     root = Path(__file__).resolve().parents[1] / "native"
     appearance = (root / "VisualGramLocalAppearance.swift").read_text(encoding="utf-8")

@@ -41,11 +41,16 @@ def apply_paid_stars(root, project):
 ''')
 
     composer = ui / "Sources/ChatControllerNode.swift"
+    replace(composer, '''                    self.maybeSendEphemeralMessage { [weak self] in
+                        guard let self else {
+''', '''                    self.maybeSendEphemeralMessage { [weak self, weak controller] in
+                        guard let self, let controller else {
+''')
     replace(composer, '''                            controller.presentPaidMessageAlertIfNeeded(count: count, completion: { [weak self] postpone in
                                 self?.sendCurrentMessage(postpone: postpone)
                             })
-''', '''                            let sendWithTelegram: () -> Void = { [weak self, weak controller] in
-                                controller?.presentPaidMessageAlertIfNeeded(count: count, completion: { [weak self] postpone in
+''', '''                            let sendWithTelegram: () -> Void = { [weak self, weak telegramController = controller] in
+                                telegramController?.presentPaidMessageAlertIfNeeded(count: count, completion: { [weak self] postpone in
                                     self?.sendCurrentMessage(postpone: postpone)
                                 })
                             }
