@@ -258,6 +258,9 @@ private func visualGramGiftHasPremium(context: AccountContext) -> Bool {
     apply_gift_flow(root, project)
     from apply_native_stars_history import apply_stars_history
     apply_stars_history(root, project)
+    from apply_native_profile_v2 import add_legacy_toggle, apply_profile_v2
+    add_legacy_toggle(root)
+    apply_profile_v2(root, project)
 
 
 if __name__ == "__main__":
