@@ -293,14 +293,14 @@ private final class VisualGramProfileGiftBubble: UIView {
     private let glass = GlassBackgroundView(frame: .zero)
     private let highlight = CAGradientLayer()
     private let rim = CAShapeLayer()
-    private let icon: GiftIconLayer
+    private let icon: CALayer
     private let tint: UIColor
     private var dark: Bool?
 
     init(context: AccountContext, gift: ProfileGiftsContext.State.StarGift, uniqueGift: StarGift.UniqueGift) {
         self.slug = uniqueGift.slug
         self.gift = gift
-        self.icon = GiftIconLayer(context: context, gift: gift, size: CGSize(width: 32.0, height: 32.0), glowing: false)
+        self.icon = makeVisualGramGiftIconLayer(context: context, gift: gift, size: CGSize(width: 32.0, height: 32.0))
         var tint = UIColor.systemTeal
         for attribute in uniqueGift.attributes {
             if case let .backdrop(_, _, color, _, _, _, _) = attribute {

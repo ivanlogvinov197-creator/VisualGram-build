@@ -65,7 +65,11 @@ def apply_profile_v2(root, project):
             var validIds = Set<AnyHashable>()
             var index = 0
             for gift in self.gifts.prefix(12) {''')
-    replace(source, 'private class GiftIconLayer: SimpleLayer {', 'final class GiftIconLayer: SimpleLayer {')
+    replace(source, 'private class GiftIconLayer: SimpleLayer {', '''func makeVisualGramGiftIconLayer(context: AccountContext, gift: ProfileGiftsContext.State.StarGift, size: CGSize) -> CALayer {
+    return GiftIconLayer(context: context, gift: gift, size: size, glowing: false)
+}
+
+private class GiftIconLayer: SimpleLayer {''')
 
     header = peer / "PeerInfoScreen/Sources/PeerInfoHeaderNode.swift"
     replace(header, '    let giftsCover = ComponentView<Empty>()\n', '''    let giftsCover = ComponentView<Empty>()
