@@ -41,6 +41,7 @@ def apply_paid_stars(root, project):
 ''')
 
     composer = ui / "Sources/ChatControllerNode.swift"
+    replace(composer, 'import TelegramCore\n', 'import TelegramCore\nimport ChatMessagePaymentAlertController\n')
     replace(composer, '''                    self.maybeSendEphemeralMessage { [weak self] in
                         guard let self else {
 ''', '''                    self.maybeSendEphemeralMessage { [weak self, weak controller] in
@@ -49,26 +50,24 @@ def apply_paid_stars(root, project):
     replace(composer, '''                            controller.presentPaidMessageAlertIfNeeded(count: count, completion: { [weak self] postpone in
                                 self?.sendCurrentMessage(postpone: postpone)
                             })
-''', '''                            let sendWithTelegram: () -> Void = { [weak self, weak telegramController = controller] in
-                                telegramController?.presentPaidMessageAlertIfNeeded(count: count, completion: { [weak self] postpone in
+''', '''                            if !self.presentLocalPaidMessageConfirmation() {
+                                controller.presentPaidMessageAlertIfNeeded(count: count, completion: { [weak self] postpone in
                                     self?.sendCurrentMessage(postpone: postpone)
                                 })
                             }
-                            if !self.presentVisualGramPaidMessageChoice(sendWithTelegram: sendWithTelegram) {
-                                sendWithTelegram()
-                            }
 ''')
-    replace(composer, '''    func sendCurrentMessage(silentPosting: Bool? = nil,''', r'''    private func presentVisualGramPaidMessageChoice(sendWithTelegram: @escaping () -> Void) -> Bool {
+    replace(composer, '''    func sendCurrentMessage(silentPosting: Bool? = nil,''', r'''    private func presentLocalPaidMessageConfirmation() -> Bool {
         let store = VisualGramLocalAppearance.shared
         let accountId = self.context.account.peerId
         let state = self.chatPresentationInterfaceState
-        guard let balance = store.visualStarsBalance(accountId: accountId),
+        guard store.visualStarsBalance(accountId: accountId) != nil,
               state.subject == nil, case let .peer(peerId) = state.chatLocation,
               peerId.namespace == Namespaces.Peer.CloudUser, peerId != accountId,
               state.interfaceState.editMessage == nil, state.interfaceState.forwardMessageIds?.isEmpty != false,
               state.interfaceState.replyMessageSubject == nil, state.interfaceState.postSuggestionState == nil,
               let price = state.sendPaidMessageStars?.value, price > 0,
               canSendMessagesToChat(state),
+              let renderedPeer = state.renderedPeer.flatMap(EngineRenderedPeer.init),
               let controller = self.controller, let panel = self.textInputPanelNode else { return false }
 
         let draft = panel.inputTextState
@@ -76,8 +75,10 @@ def apply_paid_stars(root, project):
         let text = expandedInputStateAttributedString(draft.inputText)
         let pieces = chatComposerTextMessages(effectiveInputText: text, businessLinkSetup: false).pieces.map { ($0.0.string, $0.1) }
         guard !pieces.isEmpty else { return false }
-        let (total, overflow) = price.multipliedReportingOverflow(by: Int64(pieces.count))
-        guard !overflow else { return false }
+        guard let count = Int32(exactly: pieces.count), !price.multipliedReportingOverflow(by: Int64(count)).overflow else {
+            controller.showVisualGramStarsSpendError(.unavailable)
+            return true
+        }
 
         let draftIsCurrent: () -> Bool = { [weak self, weak panel] in
             guard let self, let panel else { return false }
@@ -91,32 +92,37 @@ def apply_paid_stars(root, project):
                 && canSendMessagesToChat(current)
                 && panel.inputTextState.inputText.isEqual(to: draft.inputText)
         }
-        let alert = textAlertController(context: self.context, title: "Платное сообщение",
-            text: "Визуальный баланс: \(balance) ⭐. Визуальное сообщение останется на этом устройстве.",
-            actions: [
-                TextAlertAction(type: .defaultAction, title: "Визуально за \(total) ⭐", action: { [weak self, weak controller, weak panel] in
-                    guard let self, let controller, let panel, draftIsCurrent() else { return }
-                    let now = Int32(clamping: Int64(Date().timeIntervalSince1970))
-                    let result = store.sendVisualPaidMessages(accountId: accountId, peerId: peerId, messages: pieces, price: price, now: now)
-                    guard result == .saved else {
-                        controller.showVisualGramStarsSpendError(result)
-                        return
-                    }
-                    self.updateTypingActivity(false)
-                    panel.text = ""
-                    self.requestUpdateChatInterfaceState(.immediate, true, {
-                        $0.withUpdatedComposeInputState(ChatTextInputState(inputText: NSAttributedString(string: "")))
-                            .withUpdatedComposeDisableUrlPreviews([])
-                            .withUpdatedSendMessageEffect(nil)
-                    })
-                    self.historyNode.scrollToEndOfHistory()
-                }),
-                TextAlertAction(type: .genericAction, title: "Отправить в Telegram", action: {
-                    if draftIsCurrent() { sendWithTelegram() }
-                }),
-                TextAlertAction(type: .genericAction, title: controller.presentationData.strings.Common_Cancel, action: {})
-            ], actionLayout: .vertical)
-        controller.present(alert, in: .window(.root))
+        let consentKey = "DuckGram.PaidMessageConfirmation.\(accountId.toInt64()).\(peerId.toInt64())"
+        var committed = false
+        let commit: (Bool) -> Void = { [weak self, weak paymentController = controller, weak inputPanel = panel] remember in
+            guard !committed, let self, let controller = paymentController, let panel = inputPanel, draftIsCurrent() else { return }
+            committed = true
+            let now = Int32(clamping: Int64(Date().timeIntervalSince1970))
+            let result = store.sendVisualPaidMessages(accountId: accountId, peerId: peerId, messages: pieces, price: price, now: now)
+            guard result == .saved else {
+                controller.showVisualGramStarsSpendError(result)
+                return
+            }
+            self.updateTypingActivity(false)
+            panel.text = ""
+            self.requestUpdateChatInterfaceState(.immediate, true, {
+                $0.withUpdatedComposeInputState(ChatTextInputState(inputText: NSAttributedString(string: "")))
+                    .withUpdatedComposeDisableUrlPreviews([])
+                    .withUpdatedSendMessageEffect(nil)
+            })
+            self.historyNode.scrollToEndOfHistory()
+            if remember { UserDefaults.standard.set(NSNumber(value: price), forKey: consentKey) }
+        }
+        if (UserDefaults.standard.object(forKey: consentKey) as? NSNumber)?.int64Value == price {
+            commit(false)
+        } else {
+            let alert = chatMessagePaymentAlertController(context: self.context,
+                presentationData: controller.presentationData, updatedPresentationData: nil,
+                peers: [renderedPeer], count: count, amount: StarsAmount(value: price, nanos: 0),
+                totalAmount: nil, hasCheck: true, navigationController: controller.navigationController as? NavigationController,
+                completion: commit)
+            controller.present(alert, in: .window(.root))
+        }
         return true
     }
 
@@ -139,59 +145,42 @@ def apply_paid_stars(root, project):
 ''')
 
     context_menu = ui / "Sources/Chat/ChatControllerOpenMessageContextMenu.swift"
-    replace(context_menu, 'import ReactionSelectionNode\n', 'import ReactionSelectionNode\nimport ChatSendStarsScreen\n')
     replace(context_menu, '''extension ChatControllerImpl {
 ''', r'''extension ChatControllerImpl {
     func showVisualGramStarsSpendError(_ result: VisualGramStarsSpendResult) {
-        let text = result == .insufficientBalance ? "Недостаточно визуальных звёзд." : "Операцию не удалось сохранить."
+        let text = result == .insufficientBalance ? "Недостаточно звёзд." : "Операцию не удалось сохранить."
         self.present(textAlertController(context: self.context, title: nil, text: text, actions: [
             TextAlertAction(type: .defaultAction, title: self.presentationData.strings.Common_OK, action: {})
         ]), in: .window(.root))
     }
 
-    func presentVisualGramPaidReaction(messageId: EngineMessage.Id) {
-        guard canSendReactionsToChat(self.presentationInterfaceState),
-              let channel = self.presentationInterfaceState.renderedPeer?.chatMainPeer as? TelegramChannel,
-              case .broadcast = channel.info, messageId.peerId == channel.id,
-              messageId.namespace == Namespaces.Message.Cloud else { return }
-        guard VisualGramLocalAppearance.shared.visualStarsBalance(accountId: self.context.account.peerId) != nil else { return }
-        let _ = (self.context.engine.data.get(TelegramEngine.EngineData.Item.Messages.Message(id: messageId))
-        |> deliverOnMainQueue).startStandalone(next: { [weak self] message in
-            guard let self, let message, message.adAttribute == nil else { return }
-            let store = VisualGramLocalAppearance.shared
-            let peers = store.visualReactionTopPeers(accountId: self.context.account.peerId, messageId: messageId,
-                existing: mergedMessageReactions(attributes: message.attributes, isTags: false)?.topPeers ?? [])
-            let _ = (ChatSendStarsScreen.initialData(context: self.context, peerId: messageId.peerId, reactSubject: .message(messageId),
-                topPeers: peers, visualReactionId: messageId, completion: { _, _, _, _ in })
-            |> deliverOnMainQueue).startStandalone(next: { [weak self] data in
-                guard let self, let data else { return }
-                self.push(ChatSendStarsScreen(context: self.context, initialData: data))
-            })
+    func commitQuickLocalStar(_ message: EngineMessage, onFailure: @escaping () -> Void) {
+        let store = VisualGramLocalAppearance.shared
+        let accountId = self.context.account.peerId
+        guard let channel = self.presentationInterfaceState.renderedPeer?.chatMainPeer as? TelegramChannel,
+              case .broadcast = channel.info, message.id.peerId == channel.id, message.adAttribute == nil,
+              message.id.namespace == Namespaces.Message.Cloud else {
+            onFailure()
+            return
+        }
+        let _ = (self.context.engine.data.get(TelegramEngine.EngineData.Item.Peer.ReactionSettings(id: channel.id))
+        |> deliverOnMainQueue).startStandalone(next: { [weak self] settings in
+            guard let self, self.chatLocation.peerId == channel.id else { return }
+            if case let .known(value) = settings, value.starsAllowed == false {
+                onFailure()
+                self.displaySendReactionRestrictedToast()
+                return
+            }
+            let privacy = store.visualReactionPrivacy(accountId: accountId, messageId: message.id)
+            let result = store.addVisualPaidReaction(accountId: accountId, messageId: message.id,
+                count: 1, privacy: privacy, now: Int32(clamping: Int64(Date().timeIntervalSince1970)))
+            if result != .saved {
+                onFailure()
+                self.showVisualGramStarsSpendError(result)
+            }
         })
     }
 
-''')
-    replace(context_menu, '''                case let .list(itemList):
-                    if itemList.isEmpty {
-                        return
-                    }
-                case .custom, .twoLists:
-''', '''                case let .list(itemList):
-                    if allowedReactionsAndStars.areStarsEnabled, let channel = self.presentationInterfaceState.renderedPeer?.chatMainPeer as? TelegramChannel,
-                       case .broadcast = channel.info, message.id.peerId == channel.id, message.id.namespace == Namespaces.Message.Cloud,
-                       message.adAttribute == nil, canSendReactionsToChat(self.presentationInterfaceState),
-                       VisualGramLocalAppearance.shared.visualStarsBalance(accountId: self.context.account.peerId) != nil {
-                        let action = ContextMenuActionItem(text: "Визуальные звёзды", icon: { theme in
-                            generateTintedImage(image: UIImage(systemName: "star.fill"), color: theme.contextMenu.primaryColor)
-                        }, action: { [weak self] _, complete in
-                            complete(.default)
-                            self?.presentVisualGramPaidReaction(messageId: message.id)
-                        })
-                        actions.content = .list([.action(action), .separator] + itemList)
-                    } else if itemList.isEmpty {
-                        return
-                    }
-                case .custom, .twoLists:
 ''')
     replace(context_menu, '''            let title = isGramTransfer ? self.presentationData.strings.Conversation_ContextMenuDelete : "Удалить подарок из чата?"
             let text = isGramTransfer ? "" : "Карточка исчезнет из переписки. Подарок останется в профиле владельца."
@@ -206,32 +195,58 @@ def apply_paid_stars(root, project):
 ''')
 
     chat = ui / "Sources/ChatController.swift"
-    replace(chat, '''                    if case .stars = chosenReaction {
-                        if !canSendReactionsToChat(strongSelf.presentationInterfaceState) {
-''', '''                    if case .stars = chosenReaction {
-                        if VisualGramLocalAppearance.shared.visualStarsBalance(accountId: strongSelf.context.account.peerId) != nil {
-                            strongSelf.presentVisualGramPaidReaction(messageId: message.id)
+    chat_anchor = '''                        guard let starsContext = strongSelf.context.starsContext else {
                             return
                         }
-                        if !canSendReactionsToChat(strongSelf.presentationInterfaceState) {
-''')
-
-
-    replace(context_menu, '''                    if case .stars = chosenUpdatedReaction.reaction {
-''', '''                    if case .stars = chosenUpdatedReaction.reaction {
-                        if VisualGramLocalAppearance.shared.visualStarsBalance(accountId: self.context.account.peerId) != nil {
-                            controller?.dismiss(completion: { [weak self] in
-                                self?.presentVisualGramPaidReaction(messageId: message.id)
+                        guard let peerId = strongSelf.chatLocation.peerId else {
+'''
+    replace(chat, chat_anchor, '''                        if VisualGramLocalAppearance.shared.visualStarsBalance(accountId: strongSelf.context.account.peerId) != nil {
+                            strongSelf.commitQuickLocalStar(EngineMessage(message), onFailure: { [weak itemNode] in
+                                itemNode?.awaitingAppliedReaction = nil
                             })
                             return
                         }
-''')
+''' + chat_anchor)
+    context_anchor = '''                        guard let starsContext = self.context.starsContext else {
+                            return
+                        }
+                        let _ = (combineLatest(
+                            starsContext.state,
+                            self.context.engine.data.get(TelegramEngine.EngineData.Item.Peer.ReactionSettings(id: message.id.peerId))
+'''
+    replace(context_menu, context_anchor, '''                        if VisualGramLocalAppearance.shared.visualStarsBalance(accountId: self.context.account.peerId) != nil {
+                            self.commitQuickLocalStar(EngineMessage(message), onFailure: { [weak self, weak menuController = controller] in
+                                self?.chatDisplayNode.historyNode.forEachItemNode { itemNode in
+                                    guard let itemNode = itemNode as? ChatMessageItemView, itemNode.item?.message.id == message.id else { return }
+                                    itemNode.awaitingAppliedReaction = nil
+                                }
+                                menuController?.dismiss()
+                            })
+                            return
+                        }
+''' + context_anchor)
+
     reaction_menu = ui / "Sources/ChatControllerOpenMessageReactionContextMenu.swift"
-    replace(reaction_menu, '    func openMessageSendStarsScreen(message: EngineMessage) {\n', '''    func openMessageSendStarsScreen(message: EngineMessage) {
-        if VisualGramLocalAppearance.shared.visualStarsBalance(accountId: self.context.account.peerId) != nil {
-            self.presentVisualGramPaidReaction(messageId: message.id)
-            return
+    replace(reaction_menu, '        self.context.engine.messages.forceSendPendingSendStarsReaction(id: message.id)\n', '''        let store = VisualGramLocalAppearance.shared
+        let accountId = self.context.account.peerId
+        let localStars = store.visualStarsBalance(accountId: accountId) != nil
+        if localStars {
+            guard let channel = self.presentationInterfaceState.renderedPeer?.chatMainPeer as? TelegramChannel,
+                  case .broadcast = channel.info, channel.id == message.id.peerId, message.adAttribute == nil,
+                  message.id.namespace == Namespaces.Message.Cloud else { return }
+        } else {
+            self.context.engine.messages.forceSendPendingSendStarsReaction(id: message.id)
         }
+''')
+    replace(reaction_menu, '''            let _ = (ChatSendStarsScreen.initialData(context: self.context, peerId: message.id.peerId, reactSubject: .message(message.id), topPeers: reactionsAttribute?.topPeers ?? [], completion:''', '''            let peers = reactionsAttribute?.topPeers ?? []
+            if localStars, case let .known(settings) = reactionSettings, settings.starsAllowed == false {
+                self.displaySendReactionRestrictedToast()
+                return
+            }
+            let displayedPeers = localStars ? store.visualReactionTopPeers(accountId: accountId, messageId: message.id, existing: peers) : peers
+            let _ = (ChatSendStarsScreen.initialData(context: self.context, peerId: message.id.peerId, reactSubject: .message(message.id), topPeers: displayedPeers, visualReactionId: localStars ? message.id : nil, completion:''')
+    replace(reaction_menu, '                let _ = self.context.engine.messages.sendStarsReaction(id: message.id, count: Int(amount), privacy: privacy).startStandalone()\n', '''                if localStars { return }
+                let _ = self.context.engine.messages.sendStarsReaction(id: message.id, count: Int(amount), privacy: privacy).startStandalone()
 ''')
     apply_native_reaction_screen(root)
 
@@ -325,8 +340,6 @@ def apply_native_reaction_screen(root):
                                 return
                             }
                             self.didCommitVisualReaction = true
-                            self.environment?.controller()?.dismiss()
-                            return
                         }
                         switch component.initialData.subjectInitialData {
                         case let .react(reactData):
@@ -338,7 +351,7 @@ def apply_native_reaction_screen(root):
 
         private func presentVisualStarsError(_ result: VisualGramStarsSpendResult, component: ChatSendStarsScreenComponent) {
             let presentationData = component.context.sharedContext.currentPresentationData.with { $0 }
-            let text = result == .insufficientBalance ? "Недостаточно визуальных звёзд." : "Операцию не удалось сохранить."
+            let text = result == .insufficientBalance ? "Недостаточно звёзд." : "Операцию не удалось сохранить."
             let controller = standardTextAlertController(theme: AlertControllerTheme(presentationData: presentationData),
                 title: nil, text: text, actions: [TextAlertAction(type: .defaultAction, title: presentationData.strings.Common_OK, action: {})])
             self.environment?.controller()?.present(controller, in: .window(.root))

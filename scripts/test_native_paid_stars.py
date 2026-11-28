@@ -11,7 +11,10 @@ def compose_capture_source(root):
     if composer.count(start) != 1 or composer.count(end) != 1:
         raise ValueError("Unsupported layout for the chat composer send action")
     handler = composer[composer.index(start):composer.index(end)]
-    return COMPOSER_STUBS + handler + COMPOSER_CHECKS
+    start = composer.index('        let consentKey = "DuckGram.PaidMessageConfirmation.')
+    end = composer.index("        return true\n    }", start)
+    confirmation = composer[start:end]
+    return COMPOSER_STUBS + handler + COMPOSER_CHECKS + PAYMENT_STUBS + confirmation + PAYMENT_CHECKS
 
 
 def validate_compose_capture(root):
@@ -66,7 +69,7 @@ final class ChatControllerNode {
     let chatPresentationInterfaceState = InterfaceState()
     let controllerInteraction = Interaction()
     var afterEphemeralCheck: (() -> Void)?
-    var telegramChoice: (() -> Void)?
+    var localConfirmations = 0
     var offersVisualSending = false
     var sent: [Bool] = []
 
@@ -79,9 +82,9 @@ final class ChatControllerNode {
         self.afterEphemeralCheck = sendNormally
     }
 
-    func presentVisualGramPaidMessageChoice(sendWithTelegram: @escaping () -> Void) -> Bool {
+    func presentLocalPaidMessageConfirmation() -> Bool {
         guard self.offersVisualSending else { return false }
-        self.telegramChoice = sendWithTelegram
+        self.localConfirmations += 1
         return true
     }
 
@@ -120,10 +123,7 @@ composer.chatPresentationInterfaceState.interfaceState.forwardMessageIds = nil
 composer.textInputPanelNode?.sendMessage?()
 composer.afterEphemeralCheck?()
 precondition(controller.chargedCounts == [3])
-composer.telegramChoice?()
-precondition(controller.chargedCounts == [3, 1])
-controller.confirm?(false)
-precondition(composer.sent == [false, true, false])
+precondition(composer.localConfirmations == 1 && composer.sent == [false, true])
 
 var departing: ChatController? = ChatController()
 weak var released = departing
@@ -132,8 +132,89 @@ composer.textInputPanelNode?.sendMessage?()
 departing = nil
 precondition(released == nil)
 composer.afterEphemeralCheck?()
-precondition(composer.sent == [false, true, false])
+precondition(composer.sent == [false, true])
 print("PASS: paid chat composer Swift capture ownership, fallback and controller lifetime")
+'''
+
+
+PAYMENT_STUBS = r'''
+struct FakeId {
+    let value: Int64
+    func toInt64() -> Int64 { value }
+}
+struct StarsAmount { let value: Int64; let nanos: Int32 }
+struct ChatTextInputState { let inputText: NSAttributedString }
+struct FakeDraft {
+    func withUpdatedComposeInputState(_ state: ChatTextInputState) -> Self { self }
+    func withUpdatedComposeDisableUrlPreviews(_ list: [String]) -> Self { self }
+    func withUpdatedSendMessageEffect(_ effect: Int?) -> Self { self }
+}
+enum Transition { case immediate }
+enum AlertLayer { enum Window { case root }; case window(Window) }
+enum FakeSpendResult { case saved, unavailable }
+class NavigationController {}
+final class PaymentController {
+    var navigationController: AnyObject?
+    var presentationData = 0
+    var errors = 0
+    var confirm: ((Bool) -> Void)?
+    func present(_ alert: @escaping (Bool) -> Void, in layer: AlertLayer) { self.confirm = alert }
+    func showVisualGramStarsSpendError(_ result: FakeSpendResult) { errors += 1 }
+}
+func chatMessagePaymentAlertController(context: Int, presentationData: Int, updatedPresentationData: Int?, peers: [Int],
+    count: Int32, amount: StarsAmount, totalAmount: StarsAmount?, hasCheck: Bool, navigationController: NavigationController?,
+    completion: @escaping (Bool) -> Void) -> (Bool) -> Void {
+    precondition(hasCheck && count == 1)
+    return completion
+}
+final class Store {
+    var result = FakeSpendResult.saved
+    var attempts = 0
+    func sendVisualPaidMessages(accountId: FakeId, peerId: FakeId, messages: [String], price: Int64, now: Int32) -> FakeSpendResult {
+        self.attempts += 1
+        return self.result
+    }
+}
+final class PaymentComposer {
+    final class History { func scrollToEndOfHistory() {} }
+    final class Panel { var text = "hello" }
+    let historyNode = History()
+    let panel = Panel()
+    let context = 0
+    func updateTypingActivity(_ active: Bool) {}
+    func requestUpdateChatInterfaceState(_ transition: Transition, _ animated: Bool, _ transform: (FakeDraft) -> FakeDraft) {}
+    func present(store: Store, controller: PaymentController, price: Int64, current draftIsCurrent: @escaping () -> Bool) {
+        let panel = self.panel
+        let accountId = FakeId(value: -780001), peerId = FakeId(value: -780002)
+        let pieces = ["hello"], count: Int32 = 1, renderedPeer = 0
+'''
+
+
+PAYMENT_CHECKS = r'''
+    }
+}
+let consent = "DuckGram.PaidMessageConfirmation.-780001.-780002"
+UserDefaults.standard.removeObject(forKey: consent)
+defer { UserDefaults.standard.removeObject(forKey: consent) }
+let payments = PaymentComposer(), receipt = PaymentController(), ledger = Store()
+payments.present(store: ledger, controller: receipt, price: 55, current: { false })
+receipt.confirm?(true)
+precondition(ledger.attempts == 0)
+ledger.result = .unavailable
+payments.present(store: ledger, controller: receipt, price: 55, current: { true })
+receipt.confirm?(true)
+precondition(receipt.errors == 1 && payments.panel.text == "hello" && UserDefaults.standard.object(forKey: consent) == nil)
+ledger.result = .saved
+payments.present(store: ledger, controller: receipt, price: 55, current: { true })
+receipt.confirm?(true)
+receipt.confirm?(true)
+precondition(ledger.attempts == 2 && payments.panel.text == "")
+receipt.confirm = nil
+payments.present(store: ledger, controller: receipt, price: 55, current: { true })
+precondition(receipt.confirm == nil && ledger.attempts == 3)
+payments.present(store: ledger, controller: receipt, price: 56, current: { true })
+precondition(receipt.confirm != nil && ledger.attempts == 3)
+print("PASS: stock payment confirmation commits once, checks draft, remembers only a successful price")
 '''
 
 
@@ -185,7 +266,7 @@ public struct MessageReaction {
     enum Reaction { case stars, other }
     let value: Reaction
     var count: Int32
-    let chosenOrder: Int?
+    var chosenOrder: Int?
 }
 public final class ReactionsMessageAttribute {
     public struct TopPeer {
@@ -319,6 +400,7 @@ let rendered = VisualGramLocalAppearance.displayingVisualPaidReaction(original, 
 let renderedReaction = rendered.attributes.first as! ReactionsMessageAttribute
 assert(renderedReaction.reactions.map(\.count) == [32, 3] && renderedReaction.recentPeers == [1] && renderedReaction.topPeers == [2])
 assert(originalReaction.reactions.map(\.count) == [12, 3] && rendered.stableVersion != original.stableVersion)
+assert(renderedReaction.reactions[0].chosenOrder == 0 && originalReaction.reactions[0].chosenOrder == nil)
 let pending = Message(attributes: [originalReaction, PendingStarsReactionsMessageAttribute()], stableVersion: 1)
 assert(VisualGramLocalAppearance.displayingVisualPaidReaction(pending, count: 20).stableVersion == pending.stableVersion)
 

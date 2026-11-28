@@ -30,9 +30,7 @@ private enum VisualGramChannelQuery: Equatable {
 
 private enum VisualGramChannelsAction: Hashable {
     case selectSubscribers
-    case copyChannel
-    case openCopy(Int64)
-    case editSubscriberCount(Int64)
+    case profileChannel
 }
 
 private struct VisualGramChannelsMenuEntry: ItemListNodeEntry {
@@ -70,41 +68,30 @@ private final class VisualGramChannelsMenuActions {
     }
 
     func open(_ action: VisualGramChannelsAction) {
-        let accountId = self.context.account.peerId
-        switch action {
-        case .selectSubscribers:
-            self.askForSource(copying: false)
-        case .copyChannel:
-            self.askForSource(copying: true)
-        case let .openCopy(source):
-            let sourceId = EnginePeer.Id(source)
-            guard self.store.visualChannel(accountId: accountId, sourcePeerId: sourceId)?.isCopied == true else {
-                self.message("Копия канала недоступна.")
-                return
-            }
-            self.controller?.push(visualGramChannelPostsController(context: self.context, sourcePeerId: sourceId))
-        case let .editSubscriberCount(source):
-            let sourceId = EnginePeer.Id(source)
-            guard let record = self.store.visualChannel(accountId: accountId, sourcePeerId: sourceId) else { return }
-            self.editCount(sourceId: sourceId, initial: record.properties)
-        }
+        self.askForSource(action)
     }
 
-    private func askForSource(copying: Bool) {
+    private func askForSource(_ action: VisualGramChannelsAction) {
         guard self.lookupToken == nil else { return }
-        self.presentInput(title: copying ? "Скопировать канал" : "Выбор подписчиков",
-                          message: nil, placeholder: "@юзернейм или ID канала", value: "",
+        let selected = action == .profileChannel ? self.store.profileChannel(accountId: self.context.account.peerId) : nil
+        self.presentInput(title: action == .profileChannel ? "Канал в профиле" : "Количество подписчиков",
+                          message: selected == nil ? nil : "Пустое поле возвращает канал из настроек Telegram.",
+                          placeholder: "@юзернейм или ID канала", value: selected.map { String($0.id._internalGetInt64Value()) } ?? "",
                           keyboard: .default, action: "Найти") { [weak self] input in
             guard let self else { return }
+            if action == .profileChannel, selected != nil, input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                self.saveProfileChannel(nil, replacing: selected)
+                return
+            }
             guard let query = VisualGramChannelQuery(input) else {
                 self.message("Введи @юзернейм, числовой ID или ID канала в формате −100…")
                 return
             }
-            self.lookupSource(query, copying: copying)
+            self.lookupSource(query, action: action, previous: selected)
         }
     }
 
-    private func lookupSource(_ query: VisualGramChannelQuery, copying: Bool) {
+    private func lookupSource(_ query: VisualGramChannelQuery, action: VisualGramChannelsAction, previous: EnginePeer.Id?) {
         guard self.lookupToken == nil, let controller = self.controller else { return }
         let token = UUID()
         self.lookupToken = token
@@ -128,6 +115,11 @@ private final class VisualGramChannelsMenuActions {
         case let .id(id):
             let sourceId = EnginePeer.Id(namespace: Namespaces.Peer.CloudChannel, id: ._internalFromInt64Value(id))
             resolve = context.engine.data.get(TelegramEngine.EngineData.Item.Peer.Peer(id: sourceId))
+            |> mapToSignal { cached in
+                if let cached { return .single(cached) }
+                return context.engine.peers.findChannelById(channelId: id)
+                |> timeout(12.0, queue: .mainQueue(), alternate: .single(nil))
+            }
         }
 
         let source = resolve
@@ -164,39 +156,36 @@ private final class VisualGramChannelsMenuActions {
             guard let (sourceId, properties) = result else {
                 switch query {
                 case .id:
-                    self.message("Канал с таким ID не найден на устройстве. Сначала открой канал или укажи его @юзернейм.")
+                    self.message("Канал с таким ID недоступен. Проверь ID или укажи @юзернейм.")
                 case .username:
                     self.message("Канал не найден. Проверь @юзернейм и подключение.")
                 }
                 return
             }
-            if copying {
-                self.confirmCopy(sourceId: sourceId, initial: properties)
+            if action == .profileChannel {
+                self.confirmProfileChannel(sourceId: sourceId, title: properties.title, previous: previous)
             } else {
                 self.editCount(sourceId: sourceId, initial: properties)
             }
         }))
     }
 
-    private func confirmCopy(sourceId: EnginePeer.Id, initial: VisualGramChannelProperties) {
-        let accountId = self.context.account.peerId
-        if self.store.visualChannel(accountId: accountId, sourcePeerId: sourceId)?.isCopied == true {
-            self.open(.openCopy(sourceId.toInt64()))
-            return
-        }
-        let alert = textAlertController(context: self.context, title: "Скопировать канал?",
-            text: "«\(initial.title)» появится в разделе «Каналы». Посты копии видны на этом устройстве.", actions: [
+    private func confirmProfileChannel(sourceId: EnginePeer.Id, title: String, previous: EnginePeer.Id?) {
+        let alert = textAlertController(context: self.context, title: "Канал в профиле",
+            text: "Показывать «\(title)» в твоём профиле?", actions: [
                 TextAlertAction(type: .genericAction, title: "Отмена", action: {}),
-                TextAlertAction(type: .defaultAction, title: "Скопировать", action: { [weak self] in
-                    guard let self else { return }
-                    guard self.store.copyVisualChannel(accountId: accountId, sourcePeerId: sourceId, initial: initial) else {
-                        self.message("Не удалось сохранить копию канала.")
-                        return
-                    }
-                    self.open(.openCopy(sourceId.toInt64()))
+                TextAlertAction(type: .defaultAction, title: "Показать", action: { [weak self] in
+                    self?.saveProfileChannel(sourceId, replacing: previous)
                 })
             ])
         self.controller?.present(alert, in: .window(.root))
+    }
+
+    private func saveProfileChannel(_ sourceId: EnginePeer.Id?, replacing previous: EnginePeer.Id?) {
+        guard self.store.setProfileChannel(accountId: self.context.account.peerId, channelId: sourceId, replacing: previous) else {
+            self.message("Не удалось сохранить канал профиля.")
+            return
+        }
     }
 
     private func editCount(sourceId: EnginePeer.Id, initial: VisualGramChannelProperties) {
@@ -268,25 +257,13 @@ private final class VisualGramChannelsMenuActions {
 
 func visualGramChannelsMenuController(context: AccountContext) -> ViewController {
     let actions = VisualGramChannelsMenuActions(context: context)
-    let store = VisualGramLocalAppearance.shared
-    let signal = combineLatest(context.sharedContext.presentationData, store.changes)
+    let signal = context.sharedContext.presentationData
     |> deliverOnMainQueue
-    |> map { presentationData, _ -> (ItemListControllerState, (ItemListNodeState, Any)) in
-        var entries = [
-            VisualGramChannelsMenuEntry(stableId: .selectSubscribers, position: 0, section: 0, title: "Выбор подписчиков", label: ""),
-            VisualGramChannelsMenuEntry(stableId: .copyChannel, position: 1, section: 0, title: "Скопировать канал", label: "")
+    |> map { presentationData -> (ItemListControllerState, (ItemListNodeState, Any)) in
+        let entries = [
+            VisualGramChannelsMenuEntry(stableId: .selectSubscribers, position: 0, section: 0, title: "Количество подписчиков", label: ""),
+            VisualGramChannelsMenuEntry(stableId: .profileChannel, position: 1, section: 0, title: "Канал в профиле", label: "")
         ]
-        for channel in store.visualChannels(accountId: context.account.peerId) {
-            if channel.isCopied {
-                entries.append(.init(stableId: .openCopy(channel.sourcePeerId), position: entries.count, section: 1,
-                                     title: channel.properties.title, label: "Копия"))
-            } else if let count = channel.subscriberCountOverride {
-                let label = NumberFormatter.localizedString(from: NSNumber(value: count), number: .decimal)
-                entries.append(.init(stableId: .editSubscriberCount(channel.sourcePeerId), position: entries.count, section: 2,
-                                     title: channel.properties.title, label: label))
-            }
-        }
-        entries.sort()
         let state = ItemListControllerState(presentationData: ItemListPresentationData(presentationData), title: .text("Каналы"),
             leftNavigationButton: nil, rightNavigationButton: nil,
             backNavigationButton: ItemListBackButton(title: presentationData.strings.Common_Back))

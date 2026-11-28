@@ -86,11 +86,8 @@ public func visualGramChatGiftMessages(accountPeerId ownId: EnginePeer.Id, peer:
             appendMessage(identifier: transfer.id, date: transfer.date, version: 0, incoming: incoming, author: incoming ? chatPeer : ownPeer, action: .gramTransfer(amount: abs(transfer.amount), peerAddress: VisualGramLocalAppearance.visualWalletAddress(peerId: chatPeer.id), transactionId: transfer.id, comment: transfer.comment, commentEncrypted: false))
         }
         for message in appearance.paidChatMessages?[String(peerId.toInt64())] ?? [] where includesDate(message.date) && !hidden.contains(message.id) {
-            let label = "\n\nВизуальное сообщение DuckGram"
-            let start = message.text.utf16.count + 2
-            let labelEntity = MessageTextEntity(range: start ..< message.text.utf16.count + label.utf16.count, type: .Italic)
-            let attributes = TextEntitiesMessageAttribute(entities: message.entities + [labelEntity])
-            appendMessage(identifier: message.id, date: message.date, version: 0, incoming: false, author: ownPeer, attributes: [attributes], text: message.text + label, messageId: message.messageId)
+            let attributes = TextEntitiesMessageAttribute(entities: message.entities)
+            appendMessage(identifier: message.id, date: message.date, version: 0, incoming: false, author: ownPeer, attributes: [attributes], text: message.text, messageId: message.messageId)
         }
     }
     if peerId != ownId {

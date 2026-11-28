@@ -60,7 +60,7 @@ func visualGramStarsStatisticsScreen(context: AccountContext) -> ViewController 
             entries.append(.init(stableId: 5, section: 1, content: .value("Всего потрачено", stars(stats.spent))))
             entries.append(.init(stableId: 6, section: 1, content: .value("Операции", String(stats.operations))))
         } else {
-            entries.append(.init(stableId: 0, section: 0, content: .header("Визуальный баланс недоступен.")))
+            entries.append(.init(stableId: 0, section: 0, content: .header("Баланс недоступен.")))
         }
         let controllerState = ItemListControllerState(presentationData: listPresentationData, title: .text("Статистика DuckGram"), leftNavigationButton: nil, rightNavigationButton: nil, backNavigationButton: ItemListBackButton(title: presentationData.strings.Common_Back))
         let listState = ItemListNodeState(presentationData: listPresentationData, entries: entries, style: .blocks, animateChanges: false)

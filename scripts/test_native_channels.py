@@ -13,7 +13,13 @@ def source():
     read = appearance[appearance.index("    public func appearance("):appearance.index("    public func update(accountId:")]
     start = appearance.index("    @discardableResult\n    func updateValues(")
     transaction = appearance[start:appearance.index("    public static func chatGiftHash(", start)]
-    return STUBS.replace("__CHANNEL_FIELD__", field) + read + transaction + "}\n" + model + "\n" + CHECKS
+    menu = (native / "VisualGramChannelsMenu.swift").read_text(encoding="utf-8")
+    query = menu[menu.index("private enum VisualGramChannelQuery"):menu.index("private enum VisualGramChannelsAction")]
+    imports = (native / "VisualGramCollectionImport.swift").read_text(encoding="utf-8")
+    start = imports.index("    public static func username(")
+    username = imports[start:imports.index("\n    }", start) + 6]
+    return (STUBS.replace("__CHANNEL_FIELD__", field) + read + transaction + "}\n" + model +
+            "\nenum VisualGramCollectionImport {\n" + username + "\n}\n" + query + CHECKS)
 
 
 STUBS = r'''
@@ -38,6 +44,7 @@ public struct VisualGramAppearance: Codable, Equatable {
     var scheduledGifts: [Schedule]?
     var hiddenChatGifts: [String: Set<String>]?
 __CHANNEL_FIELD__
+    var profileChannelId: Int64?
 
     struct Schedule: Codable, Equatable { let targetPeerId: Int64 }
 }
@@ -73,11 +80,30 @@ public final class VisualGramLocalAppearance: @unchecked Sendable {
 
 
 CHECKS = r'''
+assert(VisualGramChannelQuery(" @Duck_Channel ") == .username("Duck_Channel"))
+assert(VisualGramChannelQuery("1234567890") == .id(1234567890))
+assert(VisualGramChannelQuery("-1001234567890") == .id(1234567890))
+for invalid in ["0", "-1000000000000", "-1234", "-9223372036854775808", "9223372036854775807", "@bad!"] {
+    assert(VisualGramChannelQuery(invalid) == nil)
+}
 let account = EnginePeer.Id(1), other = EnginePeer.Id(2)
 let source = EnginePeer.Id(-100123), additional = EnginePeer.Id(-100456), user = EnginePeer.Id(3)
 let initial = VisualGramChannelProperties(title: "Original", about: "Description", username: " @Actual ", subscriberCount: 420)
 let legacy = try JSONDecoder().decode([String: VisualGramAppearance].self, from: Data(#"{"1":{"enabled":true}}"#.utf8))
 let store = VisualGramLocalAppearance(legacy)
+assert(store.profileChannel(accountId: account) == nil)
+assert(!store.setProfileChannel(accountId: account, channelId: user, replacing: nil))
+assert(store.setProfileChannel(accountId: account, channelId: source, replacing: nil))
+assert(store.profileChannel(accountId: other) == nil)
+let reopenedProfile = VisualGramLocalAppearance(try JSONDecoder().decode([String: VisualGramAppearance].self, from: store.persisted!))
+assert(reopenedProfile.profileChannel(accountId: account) == source)
+assert(!store.setProfileChannel(accountId: account, channelId: additional, replacing: nil))
+store.allowWrites = false
+assert(!store.setProfileChannel(accountId: account, channelId: additional, replacing: source))
+assert(store.profileChannel(accountId: account) == source)
+store.allowWrites = true
+assert(store.setProfileChannel(accountId: account, channelId: nil, replacing: source))
+assert(store.profileChannel(accountId: account) == nil)
 
 assert(store.visualChannels(accountId: account).isEmpty)
 assert(!store.copyVisualChannel(accountId: account, sourcePeerId: user, initial: initial))

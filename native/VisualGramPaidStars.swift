@@ -33,7 +33,7 @@ public extension VisualGramLocalAppearance {
         let (total, overflow) = price.multipliedReportingOverflow(by: Int64(messages.count))
         guard !overflow else { return .unavailable }
 
-        return self.spendVisualStars(accountId: accountId, peerId: peerId, amount: total, title: "Визуальное платное сообщение", now: now) { profile in
+        return self.spendVisualStars(accountId: accountId, peerId: peerId, amount: total, title: "Платное сообщение", now: now) { profile in
             var chats = profile.paidChatMessages ?? [:]
             let key = String(peerId.toInt64())
             let firstId = Int64(chats[key]?.last?.messageId ?? Int32.min) + 1
@@ -53,7 +53,7 @@ public extension VisualGramLocalAppearance {
               messageId.namespace == Namespaces.Message.Cloud, messageId.id > 0, count > 0 else {
             return .unavailable
         }
-        return self.spendVisualStars(accountId: accountId, peerId: messageId.peerId, amount: Int64(count), title: "Визуальная реакция на пост", now: now) { profile in
+        return self.spendVisualStars(accountId: accountId, peerId: messageId.peerId, amount: Int64(count), title: "Звёздная реакция", now: now) { profile in
             let key = Self.visualPaidReactionKey(messageId)
             var reactions = profile.paidPostReactions ?? [:]
             let (updatedCount, overflow) = (reactions[key] ?? 0).addingReportingOverflow(count)
@@ -127,9 +127,10 @@ public extension VisualGramLocalAppearance {
         let previous = message.attributes.compactMap { $0 as? ReactionsMessageAttribute }.first
         var reactions = previous?.reactions ?? []
         if let index = reactions.firstIndex(where: { $0.value == .stars }) {
+            reactions[index].chosenOrder = reactions[index].chosenOrder ?? 0
             reactions[index].count = Int32(clamping: Int64(reactions[index].count) + Int64(count))
         } else {
-            reactions.insert(MessageReaction(value: .stars, count: count, chosenOrder: nil), at: 0)
+            reactions.insert(MessageReaction(value: .stars, count: count, chosenOrder: 0), at: 0)
         }
         let updated = ReactionsMessageAttribute(
             canViewList: previous?.canViewList ?? false,

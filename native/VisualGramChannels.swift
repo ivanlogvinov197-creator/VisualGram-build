@@ -71,6 +71,24 @@ public extension VisualGramLocalAppearance {
         return self.appearance(accountId: accountId).visualChannels?[String(sourcePeerId.toInt64())]
     }
 
+    func profileChannel(accountId: EnginePeer.Id) -> EnginePeer.Id? {
+        self.appearance(accountId: accountId).profileChannelId.map { EnginePeer.Id($0) }
+    }
+
+    func setProfileChannel(accountId: EnginePeer.Id, channelId: EnginePeer.Id?, replacing previous: EnginePeer.Id?) -> Bool {
+        guard channelId == nil || channelId?.namespace == Namespaces.Peer.CloudChannel else { return false }
+        var accepted = false
+        let saved = self.updateValues(recordOperations: false) { values in
+            let key = String(accountId.toInt64())
+            var profile = values[key] ?? VisualGramAppearance()
+            guard profile.profileChannelId == previous?.toInt64() else { return }
+            profile.profileChannelId = channelId?.toInt64()
+            values[key] = profile
+            accepted = true
+        }
+        return saved && accepted
+    }
+
     func visualChannels(accountId: EnginePeer.Id) -> [VisualGramChannelRecord] {
         self.appearance(accountId: accountId).visualChannels?.values.sorted { first, second in
             let order = first.properties.title.localizedStandardCompare(second.properties.title)

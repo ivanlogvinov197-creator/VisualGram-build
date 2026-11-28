@@ -1,16 +1,10 @@
 """Connect local channel settings to native broadcast-channel profile surfaces."""
-import shutil
 
 from prepare_native import replace
 
 
-def apply_channel_settings(root, project):
+def apply_channel_settings(root):
     sources = root / "submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources"
-    shutil.copyfile(
-        project / "native/VisualGramChannelSettingsController.swift",
-        sources / "VisualGramChannelSettingsController.swift",
-    )
-
     data = sources / "PeerInfoData.swift"
     replace(
         data,
@@ -37,51 +31,26 @@ def apply_channel_settings(root, project):
 """,
     )
 
-    items = sources / "PeerInfoProfileItems.swift"
-    replace(
-        items,
-        """        let ItemPeerPersonalChannel = 11
-        let ItemCommunity = 12
-""",
-        """        let ItemPeerPersonalChannel = 11
-        let ItemCommunity = 12
-
-        if data.threadData == nil, case .broadcast = channel.info,
-           VisualGramLocalAppearance.shared.visualChannel(accountId: context.account.peerId, sourcePeerId: channel.id)?.isCopied == true {
-            items[.peerSettings]!.append(PeerInfoScreenDisclosureItem(
-                id: "visual-gram-channel-posts",
-                text: "Визуальный канал",
-                icon: PresentationResourcesSettings.channels,
-                action: {
-                    interaction.getController()?.push(visualGramChannelPostsController(context: context, sourcePeerId: channel.id))
+    replace(data, """            return context.engine.data.subscribe(
+                TelegramEngine.EngineData.Item.Peer.PersonalChannel(id: peerId)
+            )
+""", """            let nativeChannel = context.engine.data.subscribe(
+                TelegramEngine.EngineData.Item.Peer.PersonalChannel(id: peerId)
+            )
+            guard peerId == context.account.peerId else { return nativeChannel }
+            return combineLatest(nativeChannel, VisualGramLocalAppearance.shared.changes)
+            |> map { original, _ in
+                guard let selected = VisualGramLocalAppearance.shared.profileChannel(accountId: peerId) else {
+                    return original
                 }
-            ))
-            items[.peerSettings]!.append(PeerInfoScreenDisclosureItem(
-                id: "visual-gram-channel-settings",
-                text: "Настройки визуального канала",
-                icon: PresentationResourcesSettings.chatAppearance,
-                action: {
-                    interaction.getController()?.push(visualGramChannelSettingsController(context: context, sourcePeerId: channel.id))
-                }
-            ))
-        }
-""",
-    )
-    replace(
-        items,
-        "                let ItemWelcomeMessages = 20\n",
-        """                let ItemWelcomeMessages = 20
-
-                if VisualGramLocalAppearance.shared.visualChannel(accountId: context.account.peerId, sourcePeerId: channel.id)?.isCopied == true {
-                    items[.peerSettings]!.append(PeerInfoScreenDisclosureItem(
-                        id: "visual-gram-channel-settings",
-                        text: "Настройки визуального канала",
-                        icon: PresentationResourcesSettings.chatAppearance,
-                        action: {
-                            interaction.getController()?.push(visualGramChannelSettingsController(context: context, sourcePeerId: channel.id))
-                        }
-                    ))
-                }
-
-""",
-    )
+                let count = VisualGramLocalAppearance.shared.visualChannel(accountId: peerId, sourcePeerId: selected)?.subscriberCountOverride
+                return .known(TelegramPersonalChannel(peerId: selected, subscriberCount: count, topMessageId: nil))
+            }
+""")
+    replace(data, """                if let participantCount {
+                    mappedParticipantCount = participantCount
+""", """                if let override = VisualGramLocalAppearance.shared.visualChannel(accountId: context.account.peerId, sourcePeerId: channelPeer.id)?.subscriberCountOverride {
+                    mappedParticipantCount = Int(override)
+                } else if let participantCount {
+                    mappedParticipantCount = participantCount
+""")

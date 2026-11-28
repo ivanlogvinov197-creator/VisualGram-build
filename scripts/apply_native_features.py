@@ -19,8 +19,7 @@ def apply(root, project):
     shutil.copyfile(project / "native/VisualGramChannels.swift", core / "VisualGramChannels.swift")
     shutil.copyfile(project / "native/VisualGramGiftTrading.swift", core / "VisualGramGiftTrading.swift")
     shutil.copyfile(project / "native/VisualGramAppearanceController.swift", peer / "Sources/VisualGramAppearanceController.swift")
-    for name in ("VisualGramChannelsMenu.swift", "VisualGramChannelPostsController.swift"):
-        shutil.copyfile(project / "native" / name, peer / "Sources" / name)
+    shutil.copyfile(project / "native/VisualGramChannelsMenu.swift", peer / "Sources/VisualGramChannelsMenu.swift")
     shutil.copyfile(project / "native/VisualGramChatGifts.swift", core / "VisualGramChatGifts.swift")
     shutil.copyfile(project / "native/VisualGramGiftDelivery.swift", root / "submodules/TelegramUI/Sources/VisualGramGiftDelivery.swift")
     account_context = root / "submodules/TelegramUI/Sources/AccountContext.swift"
@@ -346,12 +345,14 @@ private func visualGramGiftHasPremium(context: AccountContext) -> Bool {
     apply_money(root, project)
     from apply_native_paid_stars import apply_paid_stars
     apply_paid_stars(root, project)
-    from apply_native_local_accounts import apply_local_accounts
-    apply_local_accounts(root, project)
     from apply_native_channel_chat import apply_channel_chat
     apply_channel_chat(root)
     from apply_native_channel_settings import apply_channel_settings
-    apply_channel_settings(root, project)
+    apply_channel_settings(root)
+    from apply_native_profile_v2 import apply_profile_v2
+    apply_profile_v2(root, project)
+    from apply_native_nft_selection import apply_nft_selection
+    apply_nft_selection(root)
 
 
 if __name__ == "__main__":

@@ -23,6 +23,12 @@ public extension VisualGramLocalAppearance {
             case .outgoing: return entry.amount < 0
             }
         }.map { entry in
+            let title: String?
+            switch entry.title {
+            case "Визуальное платное сообщение": title = "Платное сообщение"
+            case "Визуальная реакция на пост": title = "Звёздная реакция"
+            default: title = entry.title
+            }
             var flags: StarsContext.State.Transaction.Flags = []
             if entry.kind == .purchase || entry.kind == .sale, case .unique = entry.gift { flags.insert(.isStarGiftResale) }
             if entry.kind == .adjustment, entry.title == VisualGramGift.StarsTransaction.upgradeTitle, case .unique = entry.gift {
@@ -37,7 +43,7 @@ public extension VisualGramLocalAppearance {
             return StarsContext.State.Transaction(
                 flags: flags, id: isDemoStarsTopUp ? Self.demoStarsTopUpId(accountId: accountId, entryId: entry.id) : (ton ? "vg-grams:" : "vg-stars:") + entry.id,
                 count: CurrencyAmount(amount: StarsAmount(value: max(-Int64.max, entry.amount), nanos: 0), currency: ton ? .ton : .stars),
-                date: entry.date, peer: peer, title: entry.title ?? (entry.kind == .adjustment && entry.amount < 0 ? (ton ? "Списание GRAM" : "Списание звёзд") : nil), description: entry.comment, photo: nil,
+                date: entry.date, peer: peer, title: title ?? (entry.kind == .adjustment && entry.amount < 0 ? (ton ? "Списание GRAM" : "Списание звёзд") : nil), description: entry.comment, photo: nil,
                 transactionDate: entry.date, transactionUrl: nil, paidMessageId: nil, giveawayMessageId: nil,
                 media: [], subscriptionPeriod: nil, starGift: entry.gift, floodskipNumber: nil,
                 starrefCommissionPermille: nil, starrefPeerId: nil, starrefAmount: nil, paidMessageCount: nil,

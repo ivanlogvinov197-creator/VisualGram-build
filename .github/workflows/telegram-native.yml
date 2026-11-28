@@ -71,6 +71,7 @@ jobs:
           python3 scripts/test_native_gift_flow.py
           python3 scripts/test_native_stars_history.py
           python3 scripts/test_native_paid_stars.py
+          python3 scripts/test_native_profile_v2.py telegram-native
           python3 scripts/test_native_november.py
           python3 scripts/test_native_activation.py
           python3 scripts/test_native_local_accounts.py

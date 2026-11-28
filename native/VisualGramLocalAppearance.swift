@@ -197,6 +197,7 @@ public struct VisualGramPremiumGift: Codable, Equatable {
 }
 
 public struct VisualGramAppearance: Codable, Equatable {
+    public var profileV2Enabled: Bool?
     public var enabled = false
     public var premium = false
     public var verified = false
@@ -241,6 +242,7 @@ public struct VisualGramAppearance: Codable, Equatable {
     var paidPostReactions: [String: Int32]?
     var paidReactionPrivacy: [String: Int64]?
     var visualChannels: [String: VisualGramChannelRecord]?
+    var profileChannelId: Int64?
 
     public init() {
     }

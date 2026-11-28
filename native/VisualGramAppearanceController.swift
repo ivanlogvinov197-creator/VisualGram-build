@@ -25,7 +25,7 @@ private enum VisualGramGuide {
         Три раза подряд нажми на вкладку «Чаты». В главном меню находятся «Профиль», «Подарки», «Балансы», «Каналы», «Гайд», проверка доступа и очистка оформления.
 
         «Каналы»
-        Укажи @юзернейм или ID канала, чтобы задать количество подписчиков или открыть копию канала. В копии можно писать посты и менять настройки. Копии и посты хранятся на этом устройстве.
+        Укажи @юзернейм или ID канала, чтобы задать количество подписчиков или добавить канал в профиль.
 
         «Выбор профиля»
         Введи @юзернейм или ID человека, чей профиль хочешь оформить в этом клиенте. Все следующие изменения применяются к выбранному профилю. Чтобы вернуться к своему, открой выбор профиля, очисти поле и сохрани.
@@ -202,7 +202,6 @@ private struct VisualGramAppearanceEntry: ItemListNodeEntry {
 
 private final class VisualGramAppearanceActions {
     let context: AccountContext
-    let openLocalAccounts: (() -> Void)?
     weak var controller: ItemListController?
     let disposables = DisposableSet()
     let activeSection = ValuePromise<Int32>(-1, ignoreRepeated: true)
@@ -215,14 +214,14 @@ private final class VisualGramAppearanceActions {
     private var giftDate = Int32(Date().timeIntervalSince1970)
     private var giftText = ""
     private let collectionImportDisposable = MetaDisposable()
+    private let variantsLoad = MetaDisposable()
     private var collectionImportToken: UUID?
 
-    init(context: AccountContext, openLocalAccounts: (() -> Void)?) {
+    init(context: AccountContext) {
         self.context = context
-        self.openLocalAccounts = openLocalAccounts
         self.targetPeerId = context.account.peerId
     }
-    deinit { self.collectionImportDisposable.dispose(); self.disposables.dispose() }
+    deinit { self.variantsLoad.dispose(); self.collectionImportDisposable.dispose(); self.disposables.dispose() }
 
     var appearance: VisualGramAppearance { return VisualGramLocalAppearance.shared.appearance(accountId: self.context.account.peerId, targetPeerId: self.targetPeerId) }
     private var scheduledGifts: [VisualGramScheduledGift] {
@@ -246,6 +245,10 @@ private final class VisualGramAppearanceActions {
 
     func toggle(_ id: Int32, value: Bool) {
         guard VisualGramActivation.shared.hasAccess else { self.openActivation(); return }
+        if id == 908 {
+            VisualGramLocalAppearance.shared.update(accountId: self.context.account.peerId) { $0.profileV2Enabled = value }
+            return
+        }
         if id == 3 {
             if value { self.configureVerification() } else { self.update { $0.verification = nil } }
             return
@@ -336,7 +339,6 @@ private final class VisualGramAppearanceActions {
 
     func open(_ id: Int32) {
         if id == 905 { self.showGuide(); return }
-        if id == 906 { self.openLocalAccounts?(); return }
         if (910..<(910 + Int32(VisualGramGuide.topics.count))).contains(id) { self.showGuide(topic: Int(id - 910)); return }
         if id == 1000 { self.openActivation(); return }
         guard VisualGramActivation.shared.hasAccess else { self.openActivation(); return }
@@ -344,6 +346,7 @@ private final class VisualGramAppearanceActions {
 
         switch id {
         case 907: self.controller?.push(visualGramChannelsMenuController(context: self.context))
+        case 909: self.selectConfiguredNFT()
         case 3: self.configureVerification()
         case 4: self.selectEmoji()
         case 5:
@@ -665,6 +668,92 @@ private final class VisualGramAppearanceActions {
         controller.push(options)
     }
 
+    private func selectConfiguredNFT() {
+        guard let controller = self.controller, let stars = self.context.starsContext else { return }
+        let target = self.targetPeerId
+        let catalog = GiftOptionsScreen(context: self.context, starsContext: stars, peerId: target, premiumOptions: [], hasBirthday: false)
+        catalog.visualGramGiftSelected = { [weak self, weak catalog] gift in
+            guard let self, let catalog, self.targetPeerId == target, VisualGramActivation.shared.hasAccess else { return }
+            let familyId: Int64
+            let original: [StarGift.UniqueGift.Attribute]?
+            switch gift {
+            case let .generic(value):
+                familyId = value.id
+                original = nil
+            case let .unique(value):
+                familyId = value.giftId
+                original = value.attributes
+            }
+            self.variantsLoad.set((self.context.engine.payments.getStarGiftUpgradeAttributes(giftId: familyId)
+            |> deliverOnMainQueue).start(next: { [weak actions = self, weak picker = catalog] variants in
+                guard let actions, let picker, picker.view.window != nil, actions.targetPeerId == target, VisualGramActivation.shared.hasAccess else { return }
+                guard let variants, variants.contains(where: { $0.attributeType == .model }),
+                      variants.contains(where: { $0.attributeType == .pattern }),
+                      variants.contains(where: { $0.attributeType == .backdrop }) else {
+                    actions.message("У этого подарка сейчас нет доступных вариантов.")
+                    return
+                }
+                let editor = GiftUpgradeVariantsScreen(context: actions.context, gift: gift, attributes: variants, selectedAttributes: original, focusedAttribute: nil)
+                editor.visualGramSelectAttributes = { [weak targetActions = actions] attributes in
+                    guard let targetActions, targetActions.targetPeerId == target, VisualGramActivation.shared.hasAccess else { return }
+                    targetActions.finishConfiguredNFT(gift: gift, attributes: attributes, target: target)
+                }
+                picker.push(editor)
+            }))
+        }
+        controller.push(catalog)
+    }
+
+    private func finishConfiguredNFT(gift: StarGift, attributes: [StarGift.UniqueGift.Attribute], target: EnginePeer.Id) {
+        let number = UIAlertController(title: "Номер подарка", message: nil, preferredStyle: .alert)
+        number.addTextField { field in
+            field.keyboardType = .numberPad
+            field.placeholder = "Номер"
+            if case let .unique(value) = gift { field.text = String(value.number) }
+        }
+        for direction: VisualGramGift.Direction in [.received, .sent] {
+            number.addAction(UIAlertAction(title: direction == .received ? "Добавить" : "Отправить", style: .default, handler: { [weak self, weak number] _ in
+                guard let self, self.targetPeerId == target, VisualGramActivation.shared.hasAccess else { return }
+                let text = number?.textFields?.first?.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                guard let serial = Int32(text), serial > 0 else {
+                    self.message("Укажи положительный номер подарка.")
+                    return
+                }
+                let familyId: Int64
+                let title: String
+                let availability: StarGift.UniqueGift.Availability
+                let releasedBy: EnginePeer.Id?
+                switch gift {
+                case let .generic(value):
+                    familyId = value.id
+                    title = value.title ?? "Подарок"
+                    availability = .init(issued: 0, total: value.availability?.total ?? 0)
+                    releasedBy = value.releasedBy
+                case let .unique(value):
+                    familyId = value.giftId
+                    title = value.title
+                    availability = value.availability
+                    releasedBy = value.releasedBy
+                }
+                let unique = StarGift.UniqueGift(id: Int64.random(in: Int64.min + 1 ..< 0), giftId: familyId, title: title, number: serial, slug: "custom-" + UUID().uuidString, owner: .peerId(target), attributes: attributes, availability: availability, giftAddress: nil, resellAmounts: nil, resellForTonOnly: false, releasedBy: releasedBy, valueAmount: nil, valueCurrency: nil, valueUsdAmount: nil, flags: [], themePeerId: nil, peerColor: nil, hostPeerId: nil, minOfferStars: nil, craftChancePermille: nil)
+                if direction == .sent {
+                    self.configureReceipt(direction: .sent) { [weak actions = self] in
+                        guard let actions, actions.targetPeerId == target, VisualGramActivation.shared.hasAccess else { return }
+                        actions.previewGift(.unique(unique))
+                    }
+                } else {
+                    self.direction = .received
+                    self.counterpartyId = nil
+                    self.giftText = ""
+                    self.giftDate = Int32(clamping: Int64(Date().timeIntervalSince1970))
+                    self.previewGift(.unique(unique))
+                }
+            }))
+        }
+        number.addAction(UIAlertAction(title: "Отмена", style: .cancel))
+        self.presentNative(number)
+    }
+
     private func importUniqueGift() {
         self.form(title: "Добавить NFT-подарки", fields: [("Ссылки или slug через пробел или новую строку", "")]) { [weak self] values in
             guard let self, let input = values.first else { return }
@@ -850,9 +939,11 @@ private final class VisualGramAppearanceActions {
         }
         let title = deliveryDate == nil ? (local.direction == .sent ? "Отправить" : "Получить") : "Отложить"
         let preview = GiftViewScreen(context: self.context, subject: subject, customAction: .init(title: title, action: { [weak self] in
-            guard let self else { return }
+            guard let self, self.targetPeerId == targetPeerId, VisualGramActivation.shared.hasAccess else { return }
             if let deliveryDate {
-                VisualGramLocalAppearance.shared.scheduleGift(accountId: self.context.account.peerId, targetPeerId: targetPeerId, gift: local, deliveryDate: deliveryDate)
+                if !VisualGramLocalAppearance.shared.scheduleGift(accountId: self.context.account.peerId, targetPeerId: targetPeerId, gift: local, deliveryDate: deliveryDate) {
+                    self.message("Не удалось сохранить подарок.")
+                }
             } else {
                 self.deliverGift(local, targetPeerId: targetPeerId)
             }
@@ -862,7 +953,10 @@ private final class VisualGramAppearanceActions {
     }
 
     private func deliverGift(_ gift: VisualGramGift, targetPeerId: EnginePeer.Id) {
-        VisualGramLocalAppearance.shared.addGift(accountId: self.context.account.peerId, targetPeerId: targetPeerId, gift: gift)
+        guard VisualGramLocalAppearance.shared.addGift(accountId: self.context.account.peerId, targetPeerId: targetPeerId, gift: gift) else {
+            self.message("Не удалось сохранить подарок.")
+            return
+        }
         self.animateGiftDelivery()
     }
 
@@ -1163,9 +1257,9 @@ private final class VisualGramAppearanceActions {
 
 }
 
-func visualGramAppearanceController(context: AccountContext, openLocalAccounts: (() -> Void)? = nil) -> ViewController {
+func visualGramAppearanceController(context: AccountContext) -> ViewController {
     VisualGramActivation.shared.start(vendorIdentifier: UIDevice.current.identifierForVendor?.uuidString, isForeground: UIApplication.shared.applicationState != .background, activeNotification: UIApplication.didBecomeActiveNotification, backgroundNotification: UIApplication.didEnterBackgroundNotification)
-    let actions = VisualGramAppearanceActions(context: context, openLocalAccounts: openLocalAccounts)
+    let actions = VisualGramAppearanceActions(context: context)
     let signal = combineLatest(context.sharedContext.presentationData, VisualGramLocalAppearance.shared.changes, actions.expandedLists.get(), actions.activeSection.get())
     |> deliverOnMainQueue
     |> map { presentationData, _, _, activeSection -> (ItemListControllerState, (ItemListNodeState, Any)) in
@@ -1179,7 +1273,6 @@ func visualGramAppearanceController(context: AccountContext, openLocalAccounts: 
         }
         if activeSection == -1 {
             add(905, 0, "Гайд", .button(""))
-            if actions.openLocalAccounts != nil { add(906, 0, "Локальные аккаунты +888", .button("")) }
         }
         let hasAccess = VisualGramActivation.shared.hasAccess
         if activeSection == -1 || !hasAccess { add(1000, hasAccess ? -2 : 0, "Активация", .button("")) }
@@ -1194,6 +1287,7 @@ func visualGramAppearanceController(context: AccountContext, openLocalAccounts: 
             add(903, -1, "Назад", .button(""))
             switch activeSection {
             case 0:
+                add(908, 0, "Profile V2", .toggle(VisualGramLocalAppearance.shared.appearance(accountId: context.account.peerId).profileV2Enabled ?? false))
                 add(1, 0, "Telegram Premium", .toggle(value.premium))
                 add(2, 0, "Галочка Telegram", .toggle(value.verified))
                 add(3, 0, "Верификация", .button(value.verification == nil ? "Выключена" : (value.verificationSource == "hold" ? "Hold" : "Major")))
@@ -1206,6 +1300,7 @@ func visualGramAppearanceController(context: AccountContext, openLocalAccounts: 
                 add(15, 2, "Часы работы", .button("")); add(16, 2, "Адрес", .button(""))
             case 1:
                 add(24, 0, "Добавить NFT", .button("")); add(20, 0, "Добавить обычный подарок", .button(""))
+                add(909, 0, "Выбор NFT", .button(""))
                 add(25, 0, "Скопировать подарки", .button(""))
                 add(23, 1, "Отправить NFT", .button("")); add(22, 1, "Отправить обычный подарок", .button(""))
                 add(27, 2, "Мои подарки", .button("")); add(26, 2, "История операций", .button(""))

@@ -200,11 +200,13 @@ public extension VisualGramLocalAppearance {
         }
     }
 
-    func addGift(accountId: EnginePeer.Id, targetPeerId: EnginePeer.Id, gift: VisualGramGift) {
+    @discardableResult
+    func addGift(accountId: EnginePeer.Id, targetPeerId: EnginePeer.Id, gift: VisualGramGift) -> Bool {
         self.addGifts(accountId: accountId, targetPeerId: targetPeerId, gifts: [gift])
     }
 
-    func addGifts(accountId: EnginePeer.Id, targetPeerId: EnginePeer.Id, gifts: [VisualGramGift]) {
+    @discardableResult
+    func addGifts(accountId: EnginePeer.Id, targetPeerId: EnginePeer.Id, gifts: [VisualGramGift]) -> Bool {
         self.updateValues { values in
             for gift in gifts { Self.insertDeliveredGift(gift, targetPeerId: targetPeerId, values: &values) }
         }
@@ -270,11 +272,13 @@ public extension VisualGramLocalAppearance {
         value.gifts.append(gift)
     }
 
-    func scheduleGift(accountId: EnginePeer.Id, targetPeerId: EnginePeer.Id, gift: VisualGramGift, deliveryDate: Int32) {
+    @discardableResult
+    func scheduleGift(accountId: EnginePeer.Id, targetPeerId: EnginePeer.Id, gift: VisualGramGift, deliveryDate: Int32) -> Bool {
         self.scheduleGifts(accountId: accountId, targetPeerId: targetPeerId, gifts: [gift], deliveryDate: deliveryDate)
     }
 
-    func scheduleGifts(accountId: EnginePeer.Id, targetPeerId: EnginePeer.Id, gifts: [VisualGramGift], deliveryDate: Int32) {
+    @discardableResult
+    func scheduleGifts(accountId: EnginePeer.Id, targetPeerId: EnginePeer.Id, gifts: [VisualGramGift], deliveryDate: Int32) -> Bool {
         self.updateValues { values in
             let targetKey = String(targetPeerId.toInt64())
             var target = values[targetKey] ?? VisualGramAppearance()
