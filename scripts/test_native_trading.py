@@ -11,7 +11,7 @@ def source():
     model = appearance[appearance.index('public struct VisualGramGift:'):appearance.index('    public func displayGift(')] + '}\n'
     management = (root / 'native/VisualGramGiftManagement.swift').read_text(encoding='utf-8')
     reference = management[management.index('    static func isLocalReference('):management.index('    // Read-only preview samples')]
-    imports = management[management.index('    func addGift('):management.index('    func scheduleGift(')]
+    imports = management[management.index('    func addGift('):management.index('    func scheduleGift(')].rstrip().removesuffix('@discardableResult') + '\n'
     price = management[management.index('    static let localGiftUpgradeStars:'):management.index('    func upgradeLocalGift(')]
     upgraded = price + management[management.index('    static func makeUpgradedGift('):management.index('    @discardableResult\n    func updateGift(')]
     visibility = management[management.index('    func profileState('):management.index('    func collection(')]
@@ -51,7 +51,8 @@ public final class VisualGramLocalAppearance {
     var values: [String: VisualGramAppearance] = [:]
     var beforeUpdate: (() -> Void)?
     func snapshotValues() -> [String: VisualGramAppearance] { values }
-    func updateValues(recordOperations: Bool = true, _ change: (inout [String: VisualGramAppearance]) -> Void) { let hook = beforeUpdate; beforeUpdate = nil; hook?(); change(&values) }
+    @discardableResult
+    func updateValues(recordOperations: Bool = true, _ change: (inout [String: VisualGramAppearance]) -> Void) -> Bool { let hook = beforeUpdate; beforeUpdate = nil; hook?(); change(&values); return true }
     func appearance(accountId: EnginePeer.Id, targetPeerId: EnginePeer.Id? = nil) -> VisualGramAppearance { values[String((targetPeerId ?? accountId).toInt64())] ?? VisualGramAppearance() }
     func update(accountId: EnginePeer.Id, targetPeerId: EnginePeer.Id? = nil, _ change: (inout VisualGramAppearance) -> Void) { let key = String((targetPeerId ?? accountId).toInt64()); var value = values[key] ?? VisualGramAppearance(); change(&value); values[key] = value }
 '''

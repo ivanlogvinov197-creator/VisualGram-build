@@ -16,7 +16,7 @@ def source():
     base='import CryptoKit\n'+cipher+base
     persistence=actual[actual.index('    private func writeProtectedValues('):actual.index('    private func restoreProtectedValues(')]
     update=actual[actual.index('    @discardableResult\n    func updateValues('):actual.index('    public func reset(')]
-    old='    func updateValues(recordOperations: Bool = true, _ change: (inout [String: VisualGramAppearance]) -> Void) { let hook = beforeUpdate; beforeUpdate = nil; hook?(); change(&values) }'
+    old='    @discardableResult\n    func updateValues(recordOperations: Bool = true, _ change: (inout [String: VisualGramAppearance]) -> Void) -> Bool { let hook = beforeUpdate; beforeUpdate = nil; hook?(); change(&values); return true }'
     assert old in base
     base=base.replace(old,'''    private let lock = NSLock()
     private let defaults = UserDefaults(suiteName: UUID().uuidString)!
